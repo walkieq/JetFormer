@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from pathlib import Path
 from typing import Tuple, Optional, List
-from model.dataset import H5Dataset
+from src.dataset import H5Dataset
 from torch.utils.data import TensorDataset, DataLoader, random_split
 
 from sklearn.model_selection import train_test_split
@@ -19,14 +19,17 @@ from tqdm import tqdm
 from time import time
 import random
 
-from model.net import ConstituentNet
+from src.net import ConstituentNet
 
+# TODO
+# set parameters + reduce overfitting
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Data PATH
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
+MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 
 def seed_everything(seed=20):
@@ -96,7 +99,12 @@ def load_hls4ml_dataset(
 
 
 def load_N_dataset(
-    num_particles: int, num_feats: int, batch_size: int, val_ratio: float
+    num_particles: int,
+    num_feats: int,
+    batch_size: int,
+    val_ratio: float,
+    num_workers: int = 4,
+    prefetch_factor: int = 4,  # Number of batches to prefetch for each worker
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
     train_dir = os.path.join(
         PROCESSED_DIR, str(num_particles), f"{num_feats}f", "train.h5"
@@ -115,15 +123,39 @@ def load_N_dataset(
 
     train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=True,
+        persistent_workers=True,  # Keep workers alive between epochs instead of restarting
+        prefetch_factor=prefetch_factor,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        persistent_workers=True,
+        prefetch_factor=prefetch_factor,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=False,
+        persistent_workers=True,
+        prefetch_factor=prefetch_factor,
+    )
 
     return train_loader, val_loader, test_loader, classes
 
 
 def load_dataset(
-    num_particles: int, num_feats: int, batch_size: int = 128, val_ratio: float = 0.1
+    num_particles: int,
+    num_feats: int,
+    batch_size: int = 128,
+    val_ratio: float = 0.1,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
 
     if num_particles == 1:
@@ -144,16 +176,22 @@ def train_validate_loop(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     num_epochs: int,
-    # print_predictions: bool = False,
-    # model_path: Optional[str] = None,
-    # script_path: Optional[str] = None,
-    # state_path: Optional[str] = None,
+    early_stopping_patience: int,
+    num_particles: int,
+    num_feats: int,
+    model_config: dict,
 ) -> None:
     train_losses = []
     val_losses = []
     train_accs = []
     val_accs = []
     start_time = time()
+
+    best_val_loss = float("inf")
+    patience_counter = 0
+    best_model_state = None
+    best_epoch = 0
+    model_path = os.path.join(MODEL_DIR, f"{num_particles}_{num_feats}f.pth")
 
     for epoch in range(num_epochs):
         # Train
@@ -203,15 +241,66 @@ def train_validate_loop(
         val_accs.append(val_acc)
 
         print(
-            f"Epoch {epoch+1}: "
+            f"Epoch {epoch}: "
             f"Train loss={avg_train_loss:.4f}, Train acc={train_acc:.4f}, "
             f"Val loss={avg_val_loss:.4f}, Val acc={val_acc:.4f}"
         )
+
+        # Early stopping
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict()
+            best_epoch = epoch
+            save_model(model, model_config=model_config, model_path=model_path)
+
+        else:
+            patience_counter += 1
+            if patience_counter >= early_stopping_patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
+    print(f"Best model saved at epoch {best_epoch} to {model_path}")
+
+    # Load best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        model.eval()
 
     end_time = time()
     total_time = end_time - start_time
     print(f"Training took {total_time:.2f} s")
     return train_losses, val_losses, train_accs, val_accs
+
+
+def save_model(
+    model: nn.Module,
+    model_config: dict,
+    model_path: str,
+) -> None:
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "model_config": model_config,
+        },
+        model_path,
+    )
+
+
+def load_model(
+    model_class, model_name: str, device: torch.device = DEVICE
+) -> nn.Module:
+    load_path = os.path.join(MODEL_DIR, model_name)
+    checkpoint = torch.load(load_path, map_location=device, weights_only=False)
+    model_config = checkpoint["model_config"]
+    model = model_class(**model_config).to(device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model.eval()
+
+    print(f"Model loaded from {load_path}")
+    return model
 
 
 def plot_loss_acc(train_losses, val_losses, train_accs, val_accs):
@@ -255,9 +344,7 @@ def inference(
     return all_outputs, all_labels
 
 
-def evaluate_predictions(
-    outputs: np.ndarray, labels: np.ndarray, classes, average: str = "macro"
-):
+def evaluate(outputs: np.ndarray, labels: np.ndarray, classes, average: str = "macro"):
 
     pred_labels = outputs.argmax(axis=1)
     acc = accuracy_score(labels, pred_labels)
@@ -289,32 +376,6 @@ def evaluate_predictions(
     return acc, class_accs, aucs
 
 
-# def save_model(
-#   model: nn.Module,
-#   model_path: str,
-#   script_path: str,
-#   state_path: str,
-# ) -> None:
-#     model.eval()
-
-#     print(f'Model saved successfully (', end ='')
-
-
-#     model_script = torch.jit.script(model)
-#     model_script.save(script_path)
-
-#     torch.save(model, model_path)
-
-#     print(f'{model_path}, {script_path}, ', end='')
-
-#     torch.save(
-#         {'state_dict': model.state_dict()},
-#         state_path,
-#     )
-
-#     print(f'{state_path})')
-
-
 def show_config(
     num_particles: int,
     num_feats: int,
@@ -344,17 +405,13 @@ def show_config(
     print("-" * 49)
 
 
-def main(
+def train(
     num_particles: int,
     num_feats: int,
-    do_train: bool = False,
-    # model_path: Optional[str] = None,
-    # script_path: Optional[str] = None,
-    # state_path: Optional[str] = None,
-    # debug_path: Optional[str] = None,
+    do_train: bool = True,
     is_debug: bool = False,
-    num_epochs: int = 3,
-    resume: bool = False,
+    num_epochs: int = 10,
+    early_stopping_patience: int = 2,
     num_transformers: int = 3,
     embbed_dim: int = 64,
     num_heads: int = 2,
@@ -366,9 +423,7 @@ def main(
 
     # Load dataset
     train_loader, val_loader, test_loader, classes = load_dataset(
-        num_particles=num_particles,
-        num_feats=num_feats,
-        batch_size=batch_size,
+        num_particles=num_particles, num_feats=num_feats, batch_size=batch_size
     )
 
     show_config(
@@ -383,26 +438,34 @@ def main(
         dropout=dropout,
     )
 
+    model_config = {
+        "in_dim": num_feats,
+        "embbed_dim": embbed_dim,
+        "num_heads": num_heads,
+        "num_classes": len(classes),
+        "num_transformers": num_transformers,
+        "dropout": dropout,
+        "is_debug": is_debug,
+        "num_particles": num_particles,
+        "activation": activation,
+        "normalization": normalization,
+    }
+
     # Initialize model
     if do_train:
-        model = ConstituentNet(
-            in_dim=num_feats,
-            embbed_dim=embbed_dim,
-            num_heads=num_heads,
-            num_classes=len(classes),
-            num_transformers=num_transformers,
-            dropout=dropout,
-            is_debug=is_debug,
-            num_particles=num_particles,
-            activation=activation,
-            normalization=normalization,
-        ).to(DEVICE)
-
-        # Load model
-        # if resume:
-        #     state_dict = torch.load(state_path)['state_dict']
-        #     model.load_state_dict(state_dict, strict=True)
-        #     print(f'Model loaded from {state_path}')
+        model = ConstituentNet(**model_config).to(DEVICE)
+        # model = ConstituentNet(
+        #     in_dim=num_feats,
+        #     embbed_dim=embbed_dim,
+        #     num_heads=num_heads,
+        #     num_classes=len(classes),
+        #     num_transformers=num_transformers,
+        #     dropout=dropout,
+        #     is_debug=is_debug,
+        #     num_particles=num_particles,
+        #     activation=activation,
+        #     normalization=normalization,
+        # ).to(DEVICE)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -414,18 +477,11 @@ def main(
             criterion=torch.nn.NLLLoss(),
             optimizer=optimizer,
             num_epochs=num_epochs,
-            # model_path=model_path,
-            # script_path=script_path,
-            # state_path=state_path,
+            early_stopping_patience=early_stopping_patience,
+            num_particles=num_particles,
+            num_feats=num_feats,
+            model_config=model_config,
         )
-
-        # Save model
-        # save_model(...)
-    # else:
-    #     model = torch.load(model_path, map_location=DEVICE)
-    #     print(f'Model loaded from {model_path}')
-    #     model.to(DEVICE)
-    #     model.eval()
 
     print(
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
@@ -435,7 +491,16 @@ def main(
 
     # Evaluate
     outputs, labels = inference(model, test_loader)
-    evaluate_predictions(outputs, labels, classes)
+    evaluate(outputs, labels, classes)
+
+    # Load model
+    model_new = load_model(
+        model_class=ConstituentNet,
+        model_name=f"{num_particles}_{num_feats}f.pth",
+    )
+
+    outputs, labels = inference(model_new, test_loader)
+    evaluate(outputs, labels, classes)
 
 
 if __name__ == "__main__":
@@ -462,16 +527,12 @@ if __name__ == "__main__":
                 name="test",
             )
 
-    main(
+    train(
         num_particles=num_particles,
         num_feats=num_feats,
         do_train=True,
-        # model_path=os.path.join(DIR_NAME, quant_prefix + debug_prefix + 'best.model.pth'),
-        # script_path=os.path.join(DIR_NAME, quant_prefix + debug_prefix + 'best.script.pth'),
-        # state_path=os.path.join(DIR_NAME, quant_prefix + debug_prefix + 'best.pth.tar'),
-        # debug_path=os.path.join(DIR_NAME, 'layers_output.txt'),
-        num_epochs=3,
-        resume=False,
+        num_epochs=15,
+        early_stopping_patience=2,
         num_transformers=3,
         embbed_dim=64,
         num_heads=2,
