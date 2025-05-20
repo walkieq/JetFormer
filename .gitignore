@@ -14,7 +14,7 @@ env/
 *.npy
 *.csv
 data/
-outputs/
+models/
 
 # Ignore VSCode project settings
 .vscode/
