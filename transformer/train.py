@@ -18,18 +18,22 @@ from build_dataset import customize_dataset, fetch_hls4ml_dataset
 from tqdm import tqdm
 from time import time
 import random
+import copy
 
 from src.net import ConstituentNet
 
-# TODO
-# set parameters + reduce overfitting
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Data PATH
+
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 MODEL_DIR = os.path.join(BASE_DIR, "models")
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(PROCESSED_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def seed_everything(seed=20):
@@ -175,6 +179,7 @@ def train_validate_loop(
     model: nn.Module,
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler._LRScheduler,
     num_epochs: int,
     early_stopping_patience: int,
     num_particles: int,
@@ -188,6 +193,7 @@ def train_validate_loop(
     start_time = time()
 
     best_val_loss = float("inf")
+    min_delta = 1e-4  # Minimum change to qualify as an improvement
     patience_counter = 0
     best_model_state = None
     best_epoch = 0
@@ -239,20 +245,25 @@ def train_validate_loop(
             np.concatenate(all_val_labels), np.concatenate(all_val_preds)
         )
         val_accs.append(val_acc)
-
+        scheduler.step(avg_val_loss)
+        current_lr = scheduler.get_last_lr()[0]
         print(
             f"Epoch {epoch}: "
             f"Train loss={avg_train_loss:.4f}, Train acc={train_acc:.4f}, "
-            f"Val loss={avg_val_loss:.4f}, Val acc={val_acc:.4f}"
+            f"Val loss={avg_val_loss:.4f}, Val acc={val_acc:.4f}, "
+            f"LR={current_lr:.6f}"
         )
 
         # Early stopping
-        if avg_val_loss < best_val_loss:
+        # if avg_val_loss < best_val_loss:
+        if avg_val_loss < best_val_loss - min_delta:
             best_val_loss = avg_val_loss
             patience_counter = 0
-            best_model_state = model.state_dict()
+            best_model_state = copy.deepcopy(model.state_dict())
             best_epoch = epoch
-            save_model(model, model_config=model_config, model_path=model_path)
+            save_model(
+                best_model_state, model_config=model_config, model_path=model_path
+            )
 
         else:
             patience_counter += 1
@@ -265,16 +276,19 @@ def train_validate_loop(
     # Load best model
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
-        model.eval()
 
     end_time = time()
     total_time = end_time - start_time
     print(f"Training took {total_time:.2f} s")
+
+    save_loss_acc(
+        train_losses, val_losses, train_accs, val_accs, num_particles, num_feats
+    )
     return train_losses, val_losses, train_accs, val_accs
 
 
 def save_model(
-    model: nn.Module,
+    best_model_state: dict,
     model_config: dict,
     model_path: str,
 ) -> None:
@@ -282,7 +296,7 @@ def save_model(
 
     torch.save(
         {
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": best_model_state,
             "model_config": model_config,
         },
         model_path,
@@ -303,28 +317,60 @@ def load_model(
     return model
 
 
-def plot_loss_acc(train_losses, val_losses, train_accs, val_accs):
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(train_losses, label="Train Loss")
-    plt.plot(val_losses, label="Val Loss")
+def save_loss_acc(
+    train_losses, val_losses, train_accs, val_accs, num_particles, num_feats
+):
+    np.savez(
+        os.path.join(OUTPUT_DIR, f"{num_particles}_{num_feats}f_loss_acc.npz"),
+        train_losses=np.array(train_losses),
+        val_losses=np.array(val_losses),
+        train_accs=np.array(train_accs),
+        val_accs=np.array(val_accs),
+    )
+
+
+def load_loss_acc(num_particles, num_feats):
+    data = np.load(
+        os.path.join(OUTPUT_DIR, f"{num_particles}_{num_feats}f_loss_acc.npz")
+    )
+    train_losses = data["train_losses"]
+    val_losses = data["val_losses"]
+    train_accs = data["train_accs"]
+    val_accs = data["val_accs"]
+    return train_losses, val_losses, train_accs, val_accs
+
+
+def plot_loss_acc(
+    train_losses, val_losses, train_accs, val_accs, num_particles, num_feats
+):
+    epochs = np.arange(len(train_losses))
+
+    train_losses, val_losses, train_accs, val_accs = load_loss_acc(
+        num_particles, num_feats
+    )
+
+    plt.figure(figsize=(6, 6))
+    plt.subplot(2, 1, 1)
+    plt.plot(epochs, train_losses, label="Train Loss")
+    plt.plot(epochs, val_losses, label="Val Loss")
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Training and Validation Loss")
     plt.legend()
-    plt.grid(True)
+    plt.xticks(epochs)
 
-    plt.subplot(1, 2, 2)
-    plt.plot(train_accs, label="Train Acc")
-    plt.plot(val_accs, label="Val Acc")
+    plt.subplot(2, 1, 2)
+    plt.plot(epochs, train_accs, label="Train Acc")
+    plt.plot(epochs, val_accs, label="Val Acc")
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
     plt.title("Training and Validation Accuracy")
     plt.legend()
-    plt.grid(True)
+    plt.xticks(epochs)
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(os.path.join(OUTPUT_DIR, f"{num_particles}_{num_feats}f_plot.png"))
+    plt.close()
 
 
 def inference(
@@ -334,7 +380,7 @@ def inference(
     model.eval()
     all_outputs, all_labels = [], []
     with torch.no_grad():
-        for data, labels in data_loader:
+        for data, labels in tqdm(data_loader, desc="Inference", unit="batch"):
             data, labels = data.to(DEVICE), labels.to(DEVICE)
             outputs = model(data)
             all_outputs.append(outputs.detach().cpu())
@@ -393,6 +439,7 @@ def show_config(
         else f"{num_particles}_{num_feats}f jets"
     )
     print("-" * 15 + " Model configuration " + "-" * 15)
+    print(f"Device: {DEVICE}")
     print(f"Dataset: {dataset_name}")
     print(f"Batch size: {batch_size}")
     print(f"Criterion: NLLLoss")
@@ -454,20 +501,11 @@ def train(
     # Initialize model
     if do_train:
         model = ConstituentNet(**model_config).to(DEVICE)
-        # model = ConstituentNet(
-        #     in_dim=num_feats,
-        #     embbed_dim=embbed_dim,
-        #     num_heads=num_heads,
-        #     num_classes=len(classes),
-        #     num_transformers=num_transformers,
-        #     dropout=dropout,
-        #     is_debug=is_debug,
-        #     num_particles=num_particles,
-        #     activation=activation,
-        #     normalization=normalization,
-        # ).to(DEVICE)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=2, min_lr=1e-4
+        )
 
         # Train
         train_losses, val_losses, train_accs, val_accs = train_validate_loop(
@@ -476,6 +514,7 @@ def train(
             model=model,
             criterion=torch.nn.NLLLoss(),
             optimizer=optimizer,
+            scheduler=scheduler,
             num_epochs=num_epochs,
             early_stopping_patience=early_stopping_patience,
             num_particles=num_particles,
@@ -487,7 +526,9 @@ def train(
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
     )
 
-    # plot_loss_acc(train_losses, val_losses, train_accs, val_accs)
+    plot_loss_acc(
+        train_losses, val_losses, train_accs, val_accs, num_particles, num_feats
+    )
 
     # Evaluate
     outputs, labels = inference(model, test_loader)
@@ -508,11 +549,11 @@ if __name__ == "__main__":
     seed_everything(20)
 
     build_dataset = False
-    num_particles = 8
-    num_feats = 3
-
-    # num_particles = 1
-    # num_feats = 16
+    num_particles = 128
+    num_feats = 16
+    feats = range(16)
+    # num_feats = 3
+    # feats = [5, 8, 11]
 
     if build_dataset:
         if num_particles == 1:
@@ -520,10 +561,12 @@ if __name__ == "__main__":
         else:
             customize_dataset(
                 num_particles=num_particles,
+                feats=feats,
                 name="train",
             )
             customize_dataset(
                 num_particles=num_particles,
+                feats=feats,
                 name="test",
             )
 
@@ -531,8 +574,8 @@ if __name__ == "__main__":
         num_particles=num_particles,
         num_feats=num_feats,
         do_train=True,
-        num_epochs=15,
-        early_stopping_patience=2,
+        num_epochs=25,
+        early_stopping_patience=4,
         num_transformers=3,
         embbed_dim=64,
         num_heads=2,
