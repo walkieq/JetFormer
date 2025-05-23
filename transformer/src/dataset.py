@@ -4,10 +4,12 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class H5Dataset(Dataset):
-    def __init__(self, h5_path):
+    def __init__(self, h5_path, mean=None, std=None):
         self.h5_path = h5_path
         # Lazy loading, only open file when needed
         self._h5_file = None
+        self.mean = mean
+        self.std = std
 
     def _get_file(self):
         # Each DataLoader worker opens the file separately
@@ -19,7 +21,13 @@ class H5Dataset(Dataset):
         f = self._get_file()
         x = f["jetConstituentList"][idx]
         y = f["jets"][idx].argmax()
-        return torch.from_numpy(x).float(), torch.tensor(y).long()
+
+        # Normalize the data
+        x = torch.from_numpy(x).float()
+        if self.mean is not None and self.std is not None:
+            x = (x - self.mean) / (self.std + 1e-8)
+
+        return x, torch.tensor(y).long()
 
     def __len__(self):
         return self._get_file()["jetConstituentList"].shape[0]

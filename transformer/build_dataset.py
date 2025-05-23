@@ -230,10 +230,6 @@ def fetch_hls4ml_dataset(test_ratio: float = 0.2) -> None:
     y = torch.from_numpy(y)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_ratio)
 
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    X_test = scaler.transform(X_test)
-
     np.save(os.path.join(PROCESSED_DIR, "1/train", "X_train.npy"), X_train)
     np.save(os.path.join(PROCESSED_DIR, "1/test", "X_test.npy"), X_test)
     np.save(os.path.join(PROCESSED_DIR, "1/train", "y_train.npy"), y_train)
@@ -250,4 +246,5 @@ def fetch_hls4ml_dataset(test_ratio: float = 0.2) -> None:
 
 if __name__ == "__main__":
 
-    customize_dataset(num_particles=20, feats=[5, 8, 11], name="test")
+    feats = range(16)
+    # customize_dataset(num_particles=16, feats=feats, name="test")
