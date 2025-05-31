@@ -11,8 +11,7 @@ from typing import Tuple, Optional, List
 from src.dataset import H5Dataset
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, TensorDataset, DataLoader, random_split, Subset
-
-
+from fvcore.nn import FlopCountAnalysis, parameter_count_table
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
 from build_dataset import customize_dataset, fetch_hls4ml_dataset
@@ -24,7 +23,7 @@ import copy
 
 from src.net import ConstituentNet
 
-# TODO: add scaler for preprocessing
+# TODO: add scaler for preprocessing (more preprocessing?)
 # add file path as argument: path='tmp/models', 'tmp/outputs'
 # try 30 50 100 150 particles
 # try tiny transformer for 1/8 particles (3f)
@@ -257,6 +256,7 @@ def train_validate_loop(
     num_particles: int,
     num_feats: int,
     model_config: dict,
+    save: bool = True,
     model_path: Optional[str] = None,
     output_path: Optional[str] = None,
 ) -> None:
@@ -319,7 +319,10 @@ def train_validate_loop(
             np.concatenate(all_val_labels), np.concatenate(all_val_preds)
         )
         val_accs.append(val_acc)
-        scheduler.step(avg_val_loss)
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(avg_val_loss)
+        else:
+            scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         print(
             f"Epoch {epoch}: "
@@ -334,12 +337,13 @@ def train_validate_loop(
             patience_counter = 0
             best_model_state = copy.deepcopy(model.state_dict())
             best_epoch = epoch
-            save_model(
-                best_model_state,
-                model_config=model_config,
-                best_loss=best_val_loss,
-                model_path=model_path,
-            )
+            if save:
+                save_model(
+                    best_model_state,
+                    model_config=model_config,
+                    best_loss=best_val_loss,
+                    model_path=model_path,
+                )
 
         else:
             patience_counter += 1
@@ -347,22 +351,24 @@ def train_validate_loop(
                 print(f"Early stopping at epoch {epoch}")
                 break
 
-    print(f"Best model saved at epoch {best_epoch} to {model_path}")
+    if save:
+        print(f"Best model saved at epoch {best_epoch} to {model_path}")
 
     end_time = time()
     total_time = end_time - start_time
     print(f"Time taken for traing: {total_time:.2f} s")
 
     # Save loss and accuracy for training and validation
-    save_loss_acc(
-        train_losses,
-        val_losses,
-        train_accs,
-        val_accs,
-        num_particles,
-        num_feats,
-        output_path,
-    )
+    if save:
+        save_loss_acc(
+            train_losses,
+            val_losses,
+            train_accs,
+            val_accs,
+            num_particles,
+            num_feats,
+            output_path,
+        )
 
     # Load best model
     if best_model_state is not None:
@@ -400,17 +406,18 @@ def load_model(
     num_feats: int,
     device: torch.device = DEVICE,
     model_path: Optional[str] = None,
-) -> nn.Module:
+) -> Tuple[nn.Module, dict, float]:
     if model_path is None:
         model_path = os.path.join(MODEL_DIR, f"{num_particles}_{num_feats}f.pth")
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     model_config = checkpoint["model_config"]
+    best_loss = checkpoint["best_loss"]
     model = model_class(**model_config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
     print(f"Model loaded from {model_path}")
-    return model
+    return model, model_config, best_loss
 
 
 def save_loss_acc(
@@ -581,6 +588,7 @@ def train(
     normalization: str = "Batch",
     batch_size: int = 128,
     dropout: float = 0.0,
+    save: bool = True,
     model_path: Optional[str] = None,
     plot_path: Optional[str] = None,
     output_path: Optional[str] = None,
@@ -619,14 +627,15 @@ def train(
         "normalization": normalization,
     }
 
-    # Initialize model
     if do_train:
+        # Initialize model
         model = ConstituentNet(**model_config).to(DEVICE)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.5, patience=2, min_lr=1e-4
-        )
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #     optimizer, mode="min", factor=0.5, patience=2, min_lr=1e-4
+        # )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
 
         # Train
         train_losses, val_losses, train_accs, val_accs = train_validate_loop(
@@ -641,22 +650,24 @@ def train(
             num_particles=num_particles,
             num_feats=num_feats,
             model_config=model_config,
+            save=save,
             model_path=model_path,
             output_path=output_path,
         )
 
+    if save:
+        plot_loss_acc(
+            train_losses,
+            val_losses,
+            train_accs,
+            val_accs,
+            num_particles,
+            num_feats,
+            plot_path=plot_path,
+        )
+
     print(
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
-    )
-
-    plot_loss_acc(
-        train_losses,
-        val_losses,
-        train_accs,
-        val_accs,
-        num_particles,
-        num_feats,
-        plot_path=plot_path,
     )
 
     # Evaluate
@@ -664,15 +675,32 @@ def train(
     evaluate(outputs, labels, classes)
 
     # Load model
-    model_new = load_model(
-        model_class=ConstituentNet,
-        num_particles=num_particles,
-        num_feats=num_feats,
-        model_path=model_path,
-    )
+    if save:
+        model_new = load_model(
+            model_class=ConstituentNet,
+            num_particles=num_particles,
+            num_feats=num_feats,
+            model_path=model_path,
+        )[0]
 
-    outputs, labels = inference(model_new, test_loader)
-    evaluate(outputs, labels, classes)
+        outputs, labels = inference(model_new, test_loader)
+        evaluate(outputs, labels, classes)
+
+
+def count_flop_param(
+    model: nn.Module,
+    num_particles: int,
+    num_feats: int,
+) -> None:
+    model.eval()
+    # Dummy input for FLOPs calculation
+    dummy_input = torch.randn(1, num_particles, num_feats).to(DEVICE)
+
+    flops = FlopCountAnalysis(model, dummy_input)
+    print("Total FLOPs:", flops.total())
+    print(
+        f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
+    )
 
 
 if __name__ == "__main__":
@@ -713,7 +741,8 @@ if __name__ == "__main__":
         activation="ReLU",
         normalization="Batch",
         batch_size=256,
-        dropout=0.0,
+        dropout=0.2,
+        save=True,
         model_path=os.path.join(
             BASE_DIR, f"tmp/models/{num_particles}_{num_feats}f.pth"
         ),
@@ -724,3 +753,14 @@ if __name__ == "__main__":
             BASE_DIR, f"tmp/outputs/{num_particles}_{num_feats}f_loss_acc.npz"
         ),
     )
+
+    # model = load_model(
+    #     model_class=ConstituentNet,
+    #     num_particles=num_particles,
+    #     num_feats=num_feats,
+    #     model_path=os.path.join(
+    #         BASE_DIR, f"tmp/models/{num_particles}_{num_feats}f.pth"
+    #     ),
+    # )[0]
+
+    # count_flop_param(model, num_particles, num_feats)
