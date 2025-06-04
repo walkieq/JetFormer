@@ -15,6 +15,7 @@ env/
 *.csv
 data/
 models/
+outputs/
 
 # Ignore VSCode project settings
 .vscode/
