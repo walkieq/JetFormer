@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import islice
+import argparse
 
 from pathlib import Path
 from typing import Tuple, Optional, List
@@ -22,12 +23,6 @@ import random
 import copy
 
 from src.net import ConstituentNet
-
-# TODO: add scaler for preprocessing (more preprocessing?)
-# add file path as argument: path='tmp/models', 'tmp/outputs'
-# try 30 50 100 150 particles
-# try tiny transformer for 1/8 particles (3f)
-# calculate flops
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -53,7 +48,7 @@ def seed_everything(seed=20):
     torch.backends.cudnn.benchmark = False
 
 
-def load_hls4ml_dataset(
+def _load_hls4ml_dataset(
     batch_size: int, val_ratio: float
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
     train_dir = os.path.join(PROCESSED_DIR, "1/train")
@@ -173,7 +168,7 @@ def _preprocess_h5dataset(
     return train_dataset, val_dataset, test_dataset
 
 
-def load_N_dataset(
+def _load_N_dataset(
     num_particles: int,
     num_feats: int,
     batch_size: int,
@@ -234,9 +229,9 @@ def load_dataset(
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
 
     if num_particles == 1:
-        return load_hls4ml_dataset(batch_size=batch_size, val_ratio=val_ratio)
+        return _load_hls4ml_dataset(batch_size=batch_size, val_ratio=val_ratio)
     else:
-        return load_N_dataset(
+        return _load_N_dataset(
             num_particles=num_particles,
             num_feats=num_feats,
             batch_size=batch_size,
@@ -579,14 +574,14 @@ def train(
     do_train: bool = True,
     is_debug: bool = False,
     val_ratio: float = 0.1,
-    num_epochs: int = 10,
-    early_stopping_patience: int = 2,
+    num_epochs: int = 25,
+    early_stopping_patience: int = 4,
     num_transformers: int = 3,
     embbed_dim: int = 64,
     num_heads: int = 2,
     activation: str = "ReLU",
     normalization: str = "Batch",
-    batch_size: int = 128,
+    batch_size: int = 256,
     dropout: float = 0.0,
     save: bool = True,
     model_path: Optional[str] = None,
@@ -666,25 +661,28 @@ def train(
             plot_path=plot_path,
         )
 
-    print(
-        f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
-    )
+    # print(
+    #     f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
+    # )
 
     # Evaluate
     outputs, labels = inference(model, test_loader)
     evaluate(outputs, labels, classes)
 
-    # Load model
-    if save:
-        model_new = load_model(
-            model_class=ConstituentNet,
-            num_particles=num_particles,
-            num_feats=num_feats,
-            model_path=model_path,
-        )[0]
+    # # Load model
+    # if save:
+    #     model_new = load_model(
+    #         model_class=ConstituentNet,
+    #         num_particles=num_particles,
+    #         num_feats=num_feats,
+    #         model_path=model_path,
+    #     )[0]
 
-        outputs, labels = inference(model_new, test_loader)
-        evaluate(outputs, labels, classes)
+    #     outputs, labels = inference(model_new, test_loader)
+    #     evaluate(outputs, labels, classes)
+
+    # Count FLOPs and parameters
+    count_flop_param(model, num_particles, num_feats)
 
 
 def count_flop_param(
@@ -697,27 +695,50 @@ def count_flop_param(
     dummy_input = torch.randn(1, num_particles, num_feats).to(DEVICE)
 
     flops = FlopCountAnalysis(model, dummy_input)
+    print("-" * 50)
     print("Total FLOPs:", flops.total())
     print(
         f"Model parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}"
     )
+    print("-" * 50)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train transformer model")
+    parser.add_argument("--num_particles", type=int, default=30)
+    parser.add_argument("--num_feats", type=int, default=16, choices=[3, 16])
+    parser.add_argument("--num_epochs", type=int, default=25)
+    parser.add_argument("--early_stopping_patience", type=int, default=4)
+    parser.add_argument("--num_transformers", type=int, default=3)
+    parser.add_argument("--embbed_dim", type=int, default=64)
+    parser.add_argument("--num_heads", type=int, default=2)
+    parser.add_argument("--batch_size", type=int, default=256)
+    parser.add_argument("--dropout", type=float, default=0.0)
+    parser.add_argument("--seed", type=int, default=20, help="Random seed")
+    parser.add_argument("--save", action="store_true", help="Save model and outputs")
+    parser.add_argument(
+        "--build_dataset", action="store_true", help="Whether to build new dataset"
+    )
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
 
-    seed_everything(20)
+    args = parse_args()
 
-    build_dataset = False
-    num_particles = 30
-    num_feats = 16
-    feats = range(16)
-    # num_feats = 3
-    # feats = [5, 8, 11]
+    seed_everything(args.seed)
 
-    if build_dataset:
+    num_particles = args.num_particles
+    num_feats = args.num_feats
+    if args.build_dataset:
         if num_particles == 1:
             fetch_hls4ml_dataset()
         else:
+            if num_feats == 3:
+                feats = [5, 8, 11]  # pt, relative eta, relative phi
+            elif num_feats == 16:
+                feats = range(16)
             customize_dataset(
                 num_particles=num_particles,
                 feats=feats,
@@ -733,24 +754,22 @@ if __name__ == "__main__":
         num_particles=num_particles,
         num_feats=num_feats,
         do_train=True,
-        num_epochs=25,
-        early_stopping_patience=4,
-        num_transformers=3,
-        embbed_dim=64,
-        num_heads=2,
+        num_epochs=args.num_epochs,
+        early_stopping_patience=args.early_stopping_patience,
+        num_transformers=args.num_transformers,
+        embbed_dim=args.embbed_dim,
+        num_heads=args.num_heads,
         activation="ReLU",
         normalization="Batch",
-        batch_size=256,
-        dropout=0.2,
-        save=True,
-        model_path=os.path.join(
-            BASE_DIR, f"tmp/models/{num_particles}_{num_feats}f.pth"
-        ),
+        batch_size=args.batch_size,
+        dropout=args.dropout,
+        save=args.save,
+        model_path=os.path.join(BASE_DIR, f"models/{num_particles}_{num_feats}f.pth"),
         plot_path=os.path.join(
-            BASE_DIR, f"tmp/outputs/{num_particles}_{num_feats}f_plot.png"
+            BASE_DIR, f"outputs/{num_particles}_{num_feats}f_plot.png"
         ),
         output_path=os.path.join(
-            BASE_DIR, f"tmp/outputs/{num_particles}_{num_feats}f_loss_acc.npz"
+            BASE_DIR, f"outputs/{num_particles}_{num_feats}f_loss_acc.npz"
         ),
     )
 

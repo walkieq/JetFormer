@@ -17,7 +17,7 @@ PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 # Test: 260000 jets, 150 constituents, 17 features, 5 classes
 
 
-def read_h5_files(name="train", batch_size=5000):
+def _read_h5_files(name="train", batch_size=5000):
     if name == "train":
         input_path = os.path.join(DATA_DIR, "train")
         output_path = os.path.join(DATA_DIR, "merged_train.h5")
@@ -84,7 +84,7 @@ def read_h5_files(name="train", batch_size=5000):
         print("Time taken:", end_time - start_time, "s")
 
 
-def filter(name="train", batch_size=5000):
+def _filter(name="train", batch_size=5000):
     if name == "train":
         input_path = os.path.join(DATA_DIR, "merged_train.h5")
         output_path = os.path.join(DATA_DIR, "filtered_train.h5")
@@ -153,6 +153,15 @@ def customize_dataset(num_particles, feats: list = [5, 8, 11], name="train"):
 
     assert num_particles <= 150, "num_particles should be less than or equal to 150"
     assert len(feats) <= 16, "feats should be less than or equal to 16"
+
+    # Check if filtered files exist
+    filtered_train_path = os.path.join(DATA_DIR, "filtered_train.h5")
+    filtered_test_path = os.path.join(DATA_DIR, "filtered_test.h5")
+    if not (os.path.exists(filtered_train_path) and os.path.exists(filtered_test_path)):
+        _read_h5_files(name="train")
+        _read_h5_files(name="test")
+        _filter(name="train")
+        _filter(name="test")
 
     if name == "train":
         input_path = os.path.join(DATA_DIR, "filtered_train.h5")
@@ -248,11 +257,6 @@ def fetch_hls4ml_dataset(test_ratio: float = 0.2) -> None:
 
 
 if __name__ == "__main__":
-
-    # read_h5_files(name="train")
-    # read_h5_files(name="test")
-    # filter(name="train")
-    # filter(name="test")
-
     feats = range(16)
+    customize_dataset(num_particles=16, feats=feats, name="train")
     customize_dataset(num_particles=16, feats=feats, name="test")
