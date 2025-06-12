@@ -87,10 +87,10 @@ def _read_h5_files(name="train", batch_size=5000):
 def _filter(name="train", batch_size=5000):
     if name == "train":
         input_path = os.path.join(DATA_DIR, "merged_train.h5")
-        output_path = os.path.join(DATA_DIR, "new_filtered_train.h5")
+        output_path = os.path.join(DATA_DIR, "filtered_train.h5")
     elif name == "test":
         input_path = os.path.join(DATA_DIR, "merged_test.h5")
-        output_path = os.path.join(DATA_DIR, "new_filtered_test.h5")
+        output_path = os.path.join(DATA_DIR, "filtered_test.h5")
 
     pt_min = 2.0
     pt_index = 5
