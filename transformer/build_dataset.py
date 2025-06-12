@@ -87,14 +87,13 @@ def _read_h5_files(name="train", batch_size=5000):
 def _filter(name="train", batch_size=5000):
     if name == "train":
         input_path = os.path.join(DATA_DIR, "merged_train.h5")
-        output_path = os.path.join(DATA_DIR, "filtered_train.h5")
+        output_path = os.path.join(DATA_DIR, "new_filtered_train.h5")
     elif name == "test":
         input_path = os.path.join(DATA_DIR, "merged_test.h5")
-        output_path = os.path.join(DATA_DIR, "filtered_test.h5")
+        output_path = os.path.join(DATA_DIR, "new_filtered_test.h5")
 
     pt_min = 2.0
     pt_index = 5
-
     start_time = time.time()
 
     with h5py.File(input_path, "r") as fin:
@@ -118,27 +117,46 @@ def _filter(name="train", batch_size=5000):
                 maxshape=(None, y.shape[1]),
                 dtype=np.float32,
                 chunks=True,
-                compression="lzf",  # lzf for speed
+                compression="lzf",
             )
 
             write_idx = 0
             for start in tqdm(range(0, n_samples, batch_size), desc="Filtering"):
                 end = min(start + batch_size, n_samples)
-                batch_X = X[start:end]  # shape: (batch, n_constit, n_feat)
+                batch_X = X[start:end]  # shape: (B, 150, 16)
                 batch_y = y[start:end]
 
-                mask = np.any(batch_X[:, :, pt_index] >= pt_min, axis=1)
-                filtered_X = batch_X[mask]
-                filtered_y = batch_y[mask]
-                batch_len = filtered_X.shape[0]
+                filtered_X_list = []
+                filtered_y_list = []
 
-                if batch_len == 0:
+                for jet, label in zip(batch_X, batch_y):
+                    # Constituent-level: keep pt ≥ pt_min
+                    valid = jet[jet[:, pt_index] >= pt_min]
+
+                    if len(valid) == 0:
+                        continue
+
+                    pad = np.zeros(
+                        (n_constit - valid.shape[0], n_feat), dtype=np.float32
+                    )
+                    padded = np.vstack([valid, pad])
+
+                    filtered_X_list.append(padded)
+                    filtered_y_list.append(label)
+
+                if not filtered_X_list:
                     continue
 
+                filtered_X_batch = np.stack(filtered_X_list)
+                filtered_y_batch = np.stack(filtered_y_list)
+
+                batch_len = filtered_X_batch.shape[0]
                 dset_X.resize(write_idx + batch_len, axis=0)
                 dset_y.resize(write_idx + batch_len, axis=0)
-                dset_X[write_idx : write_idx + batch_len] = filtered_X
-                dset_y[write_idx : write_idx + batch_len] = filtered_y
+
+                dset_X[write_idx : write_idx + batch_len] = filtered_X_batch
+                dset_y[write_idx : write_idx + batch_len] = filtered_y_batch
+
                 write_idx += batch_len
 
             print(f"Saved filtered result to {output_path}")
@@ -258,5 +276,5 @@ def fetch_hls4ml_dataset(test_ratio: float = 0.2) -> None:
 
 if __name__ == "__main__":
     feats = range(16)
-    customize_dataset(num_particles=16, feats=feats, name="train")
-    customize_dataset(num_particles=16, feats=feats, name="test")
+    customize_dataset(num_particles=30, feats=feats, name="train")
+    customize_dataset(num_particles=30, feats=feats, name="test")
