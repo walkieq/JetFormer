@@ -13,8 +13,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Data PATH
 DATA_DIR = os.path.join(BASE_DIR, "data")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
-# Train: 620000 jets, 150 constituents, 17 features, 5 classes
-# Test: 260000 jets, 150 constituents, 17 features, 5 classes
+# Train: 620000 jets, 150 constituents, 16 features, 5 classes
+# Test: 260000 jets, 150 constituents, 16 features, 5 classes
 
 
 def _read_h5_files(name="train", batch_size=5000):
@@ -275,6 +275,8 @@ def fetch_hls4ml_dataset(test_ratio: float = 0.2) -> None:
 
 
 if __name__ == "__main__":
-    feats = range(16)
-    customize_dataset(num_particles=30, feats=feats, name="train")
-    customize_dataset(num_particles=30, feats=feats, name="test")
+    # feats = range(16)
+    # customize_dataset(num_particles=30, feats=feats, name="train")
+    # customize_dataset(num_particles=30, feats=feats, name="test")
+    customize_dataset(num_particles=8, name="train")
+    customize_dataset(num_particles=8, name="test")

@@ -106,7 +106,7 @@ def _load_hls4ml_dataset(
     return train_loader, val_loader, test_loader, classes
 
 
-def _welford_mean_std(
+def welford_mean_std(
     loader: DataLoader, max_batches: int = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     n = 0
@@ -155,7 +155,7 @@ def _preprocess_h5dataset(
     temp_loader = DataLoader(
         train_subset, batch_size=512, shuffle=False, num_workers=num_workers
     )
-    mean, std = _welford_mean_std(temp_loader, max_batches=500)
+    mean, std = welford_mean_std(temp_loader, max_batches=500)
     end_time = time()
     print(f"Time taken for preprocessing: {end_time - start_time:.2f} s")
 
@@ -283,6 +283,8 @@ def train_validate_loop(
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    scheduler.step()
                 epoch_train_loss += loss.item()
                 preds = outputs.argmax(dim=1).detach().cpu().numpy()
                 all_train_preds.append(preds)
@@ -316,7 +318,7 @@ def train_validate_loop(
         val_accs.append(val_acc)
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(avg_val_loss)
-        else:
+        elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
             scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         print(
@@ -626,11 +628,22 @@ def train(
         # Initialize model
         model = ConstituentNet(**model_config).to(DEVICE)
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
         # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         #     optimizer, mode="min", factor=0.5, patience=2, min_lr=1e-4
         # )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=1e-3,
+            steps_per_epoch=len(train_loader),
+            epochs=num_epochs,
+            pct_start=0.2,
+            anneal_strategy="cos",
+            div_factor=25.0,
+            final_div_factor=1e4,
+        )
 
         # Train
         train_losses, val_losses, train_accs, val_accs = train_validate_loop(
@@ -668,18 +681,6 @@ def train(
     # Evaluate
     outputs, labels = inference(model, test_loader)
     evaluate(outputs, labels, classes)
-
-    # # Load model
-    # if save:
-    #     model_new = load_model(
-    #         model_class=ConstituentNet,
-    #         num_particles=num_particles,
-    #         num_feats=num_feats,
-    #         model_path=model_path,
-    #     )[0]
-
-    #     outputs, labels = inference(model_new, test_loader)
-    #     evaluate(outputs, labels, classes)
 
     # Count FLOPs and parameters
     count_flop_param(model, num_particles, num_feats)
@@ -764,12 +765,14 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         dropout=args.dropout,
         save=args.save,
-        model_path=os.path.join(BASE_DIR, f"models/{num_particles}_{num_feats}f.pth"),
+        model_path=os.path.join(
+            BASE_DIR, f"tmp/models/{num_particles}_{num_feats}f.pth"
+        ),
         plot_path=os.path.join(
-            BASE_DIR, f"outputs/{num_particles}_{num_feats}f_plot.png"
+            BASE_DIR, f"tmp/outputs/{num_particles}_{num_feats}f_plot.png"
         ),
         output_path=os.path.join(
-            BASE_DIR, f"outputs/{num_particles}_{num_feats}f_loss_acc.npz"
+            BASE_DIR, f"tmp/outputs/{num_particles}_{num_feats}f_loss_acc.npz"
         ),
     )
 
