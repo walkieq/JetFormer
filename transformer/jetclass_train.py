@@ -11,12 +11,12 @@ from typing import Tuple, Optional, List
 from sklearn.metrics import accuracy_score, roc_auc_score
 import numpy as np
 from time import time
+from fvcore.nn import FlopCountAnalysis
 from train import (
     plot_loss_acc,
     evaluate,
     save_model,
     save_loss_acc,
-    count_flop_param,
     load_model,
 )
 from src.net import ConstituentNet
@@ -209,6 +209,8 @@ def train_validate_loop(
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                if isinstance(scheduler, torch.optim.lr_scheduler.OneCycleLR):
+                    scheduler.step()
                 epoch_train_loss += loss.item()
                 preds = outputs.argmax(dim=1).detach().cpu().numpy()
                 all_train_preds.append(preds)
@@ -242,7 +244,7 @@ def train_validate_loop(
         val_accs.append(val_acc)
         if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             scheduler.step(avg_val_loss)
-        else:
+        elif isinstance(scheduler, torch.optim.lr_scheduler.CosineAnnealingLR):
             scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
         print(
@@ -316,6 +318,20 @@ def inference(
     return all_outputs, all_labels
 
 
+def count_flop_param(model: nn.Module, num_particles: int, num_feats: int) -> None:
+    model.eval()
+    # Dummy input for FLOPs calculation
+    dummy_input = torch.randn(1, num_particles, num_feats).to(DEVICE)
+
+    flops = FlopCountAnalysis(model, dummy_input)
+    print("-" * 50)
+    flops = flops.total()
+    print(f"Total FLOPs: {flops / 1e6}M")
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Model parameters: {params / 1e6}M")
+    print("-" * 50)
+
+
 if __name__ == "__main__":
 
     seed_everything(20)
@@ -330,29 +346,28 @@ if __name__ == "__main__":
     num_feats = 17
     batch_size = 256
     # num_transformers = 3
-    num_transformers = 4
-    # embbed_dim = 128
-    embbed_dim = 256
+    num_transformers = 8
+    embbed_dim = 128
     # num_heads = 4
     num_heads = 8
     activation = "ReLU"
     normalization = "Batch"
-    dropout = 0
+    dropout = 0.05
 
     num_epochs = 30
     early_stopping_patience = 4
     save = True
     model_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/models/{num_particles}_{num_feats}f.pth",
+        f"jetclass_results/{n_per_class}M/models/{num_transformers}_{embbed_dim}_{num_heads}.pth",
     )
     plot_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/outputs/{num_particles}_{num_feats}f_plot.png",
+        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_plot.png",
     )
     output_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/outputs/{num_particles}_{num_feats}f_loss_acc.npz",
+        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_loss_acc.npz",
     )
 
     train_loader, val_loader, test_loader = get_dataloaders(
@@ -429,6 +444,16 @@ if __name__ == "__main__":
             plot_path=plot_path,
         )
 
+    # model = load_model(
+    #     model_class=ConstituentNet,
+    #     num_particles=num_particles,
+    #     num_feats=num_feats,
+    #     device=DEVICE,
+    #     model_path=os.path.join(
+    #         BASE_DIR,
+    #         f"jetclass_results/{n_per_class}M/models/{num_transformers}_{embbed_dim}_{num_heads}.pth",
+    #     ),
+    # )[0]
     outputs, labels = inference(model, test_loader)
     evaluate(outputs, labels, classes)
 
