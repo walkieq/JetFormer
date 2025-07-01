@@ -140,6 +140,3 @@ def run_trial(param_file):
 if __name__ == "__main__":
     seed_everything(20)
     run_trial(sys.argv[1])
-    import gc
-    gc.collect()
-    torch.cuda.empty_cache()

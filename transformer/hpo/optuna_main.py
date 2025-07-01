@@ -9,7 +9,7 @@ import torch
 import numpy as np
 import optuna
 from optuna.samplers import NSGAIISampler
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, random_split
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
@@ -19,7 +19,7 @@ from train import welford_mean_std, H5Dataset
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 
-def prepare_dataset(num_particles=8, num_feats=3, val_ratio=0.1):
+def prepare_dataset(num_particles=8, num_feats=3, val_ratio=0.1, seed=None):
     train_path = os.path.join(
         PROJECT_ROOT, "data/processed", str(num_particles), f"{num_feats}f", "train.h5"
     )
@@ -28,16 +28,16 @@ def prepare_dataset(num_particles=8, num_feats=3, val_ratio=0.1):
     val_size = int(total_len * val_ratio)
     train_size = total_len - val_size
 
-    torch.manual_seed(20)
-    permuted_indices = torch.randperm(total_len)
-    train_indices = permuted_indices[:train_size]
-    val_indices = permuted_indices[train_size:]
+    if seed:
+        torch.manual_seed(seed)
+    train_subset, val_subset = random_split(raw_dataset, [train_size, val_size])
+    train_indices = train_subset.indices
+    val_indices = val_subset.indices
 
     Path("split_data").mkdir(exist_ok=True)
-    np.save("split_data/train_indices.npy", train_indices.numpy())
-    np.save("split_data/val_indices.npy", val_indices.numpy())
+    np.save("split_data/train_indices.npy", np.array(train_indices))
+    np.save("split_data/val_indices.npy", np.array(val_indices))
 
-    train_subset = Subset(raw_dataset, train_indices)
     loader_for_stats = DataLoader(
         train_subset, batch_size=512, shuffle=False, num_workers=4
     )
@@ -54,7 +54,7 @@ def structure_objective(trial):
         "dim_heads", ["8_2", "16_2", "32_2", "64_2", "64_4", "128_2", "128_4", "128_8"]
     )
     embbed_dim, num_heads = map(int, dim_heads.split("_"))
-    dropout = trial.suggest_categorical("dropout", [0.0, 0.05, 0.1])
+    dropout = trial.suggest_categorical("dropout", [0.0, 0.05])
 
     trial_params = {
         "num_particles": 8,
@@ -111,8 +111,8 @@ def optimization(n_trials: int = 30):
     study = optuna.create_study(
         directions=["minimize", "maximize"],
         sampler=NSGAIISampler(seed=20, constraints_func=constraints_func),
-        study_name="study_8p3f",
-        storage="sqlite:///optuna_results/study_8p3f.db",
+        study_name="study_new",
+        storage="sqlite:///optuna_results/study_new.db",
         load_if_exists=True,
     )
     study.optimize(structure_objective, n_trials=n_trials)
@@ -120,5 +120,5 @@ def optimization(n_trials: int = 30):
 
 if __name__ == "__main__":
     # For 8 particle 3 feature dataset
-    prepare_dataset(num_particles=8, num_feats=3)
+    prepare_dataset(num_particles=8, num_feats=3, seed=20)
     optimization(n_trials=80)
