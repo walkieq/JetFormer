@@ -12,7 +12,7 @@ from typing import Tuple, Optional, List
 from src.dataset import H5Dataset
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, TensorDataset, DataLoader, random_split, Subset
-from fvcore.nn import FlopCountAnalysis, parameter_count_table
+from fvcore.nn import FlopCountAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
 from build_dataset import customize_dataset, fetch_hls4ml_dataset
@@ -23,7 +23,6 @@ import random
 import copy
 
 from src.net import ConstituentNet
-
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -251,6 +250,7 @@ def train_validate_loop(
     num_particles: int,
     num_feats: int,
     model_config: dict,
+    device: torch.device = DEVICE,
     save: bool = True,
     model_path: Optional[str] = None,
     output_path: Optional[str] = None,
@@ -277,7 +277,7 @@ def train_validate_loop(
         with tqdm(train_loader, unit="batch") as tepoch:
             tepoch.set_description(f"Training epoch {epoch+1}/{num_epochs}")
             for idx, (data, labels) in enumerate(tepoch):
-                data, labels = data.to(DEVICE), labels.to(DEVICE)
+                data, labels = data.to(device), labels.to(device)
                 optimizer.zero_grad()
                 outputs = model(data)
                 loss = criterion(outputs, labels)
@@ -303,7 +303,7 @@ def train_validate_loop(
         all_val_labels = []
         with torch.no_grad():
             for data, labels in validate_loader:
-                data, labels = data.to(DEVICE), labels.to(DEVICE)
+                data, labels = data.to(device), labels.to(device)
                 outputs = model(data)
                 loss = criterion(outputs, labels)
                 epoch_val_loss += loss.item()
@@ -690,10 +690,11 @@ def count_flop_param(
     model: nn.Module,
     num_particles: int,
     num_feats: int,
+    device: torch.device = DEVICE,
 ) -> None:
     model.eval()
     # Dummy input for FLOPs calculation
-    dummy_input = torch.randn(1, num_particles, num_feats).to(DEVICE)
+    dummy_input = torch.randn(1, num_particles, num_feats).to(device)
 
     flops = FlopCountAnalysis(model, dummy_input)
     print("-" * 50)

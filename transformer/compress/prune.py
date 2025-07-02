@@ -103,6 +103,7 @@ def train(model_config, trial, num_particles, num_feats, num_epochs):
         num_particles=num_particles,
         num_feats=num_feats,
         model_config=model_config,
+        device=DEVICE,
         save=True,
         model_path=f"tmp/models/trial{trial}.pth",
         output_path=f"tmp/outputs/loss_acc_trial{trial}.npz",
@@ -166,7 +167,7 @@ def prune(
         example_inputs,
         importance=imp,
         iterative_steps=iterative_steps,
-        pruning_ratio=pruning_ratio,  # remove 50% dims
+        pruning_ratio=pruning_ratio,
         ignored_layers=ignored_layers,
         unwrapped_parameters=unwrapped_parameters,
         round_to=num_heads,  # round dim to the nearest multiple of num_headse to avoid errors
@@ -221,6 +222,7 @@ def prune(
                 num_particles=num_particles,
                 num_feats=num_feats,
                 model_config=None,
+                device=DEVICE,
                 save=False,
                 model_path=None,
                 output_path=None,
@@ -240,7 +242,9 @@ def print_linear_layer_shapes(model, name):
     print(f"\n{name} - Linear Layer Output Shapes:")
     for n, m in model.named_modules():
         if isinstance(m, nn.Linear):
-            print(f"{n}: out_features = {m.out_features}")
+            print(
+                f"{n}: in_features = {m.in_features}, out_features = {m.out_features}"
+            )
 
 
 def print_attention_heads(model, name):
@@ -258,39 +262,6 @@ def print_attention_heads(model, name):
             print(f"  head_dim   = {head_dim}")
             print(f"  q_weight.shape = {tuple(q_weight_shape)}")
             print()
-
-
-# # prune the model, iteratively if necessary.
-# # base_macs, base_nparams = tp.utils.count_ops_and_params(model, example_inputs)
-# for i in range(iterative_steps):
-#     # Taylor expansion requires gradients for importance estimation
-#     if isinstance(imp, tp.importance.TaylorImportance):
-#         # A dummy loss, please replace it with your loss function and data!
-#         loss = model(example_inputs).sum()
-#         loss.backward()  # before pruner.step()
-
-#     # pruner.step()
-#     # macs, nparams = tp.utils.count_ops_and_params(model, example_inputs)
-#     groups = pruner.step(interactive=True)
-#     for group in groups:
-#         # print(group)
-#         group.prune()
-#     summary(model, f"After step {i+1}")
-#     # finetune your model here
-#     # finetune(model)
-
-# print("\nFinal after pruning:")
-# pruned_flops, pruned_params = summary(model, "Pruned")
-# print(f"Params reduced: {(1 - pruned_params/base_params)*100:.2f}%")
-# print(f"FLOPs reduced: {(1 - pruned_flops/base_flops)*100:.2f}%")
-
-
-# # Evaluate
-# acc_before = evaluate_model(model_before_pruning, val_loader)
-# acc_after = evaluate_model(model, val_loader)
-
-# print(f"Accuracy before pruning: {acc_before:.4f}")
-# print(f"Accuracy after pruning:  {acc_after:.4f}")
 
 
 if __name__ == "__main__":
@@ -343,6 +314,7 @@ if __name__ == "__main__":
         model_class=ConstituentNet,
         num_particles=num_particles,
         num_feats=num_feats,
+        device=DEVICE,
         model_path=model_path,
     )[0]
 
@@ -355,9 +327,8 @@ if __name__ == "__main__":
     ### Prune ###
     iterative_steps = 3
     finetune_epochs = 5
-    pruning_ratio = 0.7
+    pruning_ratio = 0.5  # remove 50% dims
     model_pruned = copy.deepcopy(model).to(DEVICE)
-    print("Pruning the model...")
 
     pruned_flops, pruned_params, pruned_acc = prune(
         model_pruned=model_pruned,
