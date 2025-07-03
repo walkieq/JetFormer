@@ -6,39 +6,27 @@ import sys
 import os
 import copy
 import logging
-import random
 import numpy as np
 import pandas as pd
-
+import warnings
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 from src.net import ConstituentNet
 from src.layer import SelfAttention
-from train import load_dataset, train_validate_loop, load_model
+from train import seed_everything, load_dataset, train_validate_loop, load_model
 
-
+warnings.simplefilter(action="ignore", category=FutureWarning)
 logging.getLogger("fvcore.nn.jit_analysis").setLevel(logging.ERROR)
-
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
-def seed_everything(seed=20):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def evaluate_model(model, dataloader):
+def evaluate_model(model, dataloader, device=DEVICE):
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
         for x, y in dataloader:
-            x, y = x.to(DEVICE), y.to(DEVICE)
+            x, y = x.to(device), y.to(device)
             out = model(x)
             preds = out.argmax(dim=-1)
             correct += (preds == y).sum().item()
@@ -46,8 +34,8 @@ def evaluate_model(model, dataloader):
     return correct / total
 
 
-def count_flop_param(model, num_particles=8, num_feats=3):
-    dummy_inputs = torch.randn(1, num_particles, num_feats).to(DEVICE)
+def count_flop_param(model, num_particles=8, num_feats=3, device=DEVICE):
+    dummy_inputs = torch.randn(1, num_particles, num_feats).to(device)
     flops = FlopCountAnalysis(model, dummy_inputs).total() / 1e6
     params = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
     return flops, params
@@ -76,7 +64,15 @@ def pruning_summary(
     print(df.to_string(index=False))
 
 
-def train(model_config, trial, num_particles, num_feats, num_epochs):
+def train(
+    model_config,
+    model_index,
+    train_loader,
+    val_loader,
+    num_particles,
+    num_feats,
+    num_epochs,
+):
     model = ConstituentNet(**model_config).to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
@@ -105,8 +101,8 @@ def train(model_config, trial, num_particles, num_feats, num_epochs):
         model_config=model_config,
         device=DEVICE,
         save=True,
-        model_path=f"tmp/models/trial{trial}.pth",
-        output_path=f"tmp/outputs/loss_acc_trial{trial}.npz",
+        model_path=f"tmp/models/model{model_index}.pth",
+        output_path=f"tmp/outputs/loss_acc_model{model_index}.npz",
     )
 
 
@@ -146,8 +142,8 @@ def prune(
     verbose=False,
 ):
     if verbose:
-        print_linear_layer_shapes(model, "Before Pruning")
-        print_attention_heads(model, "Before Pruning")
+        print_linear_layer_shapes(model_pruned, "Before Pruning")
+        print_attention_heads(model_pruned, "Before Pruning")
 
     example_inputs = torch.randn(1, num_particles, num_feats).to(DEVICE)
     imp = tp.importance.TaylorImportance()
@@ -264,19 +260,49 @@ def print_attention_heads(model, name):
             print()
 
 
-if __name__ == "__main__":
-    seed_everything(20)
-    trial = 6
-    trial_config = {
-        "embbed_dim": 32,
-        "num_transformers": 4,
-        "num_heads": 2,
-        "dropout": 0,
-    }
+def load_pruned_model(model_index, pruning_ratio, device=DEVICE):
+    model_path = f"tmp/pruned_models/pruned_model{model_index}_{pruning_ratio}.pth"
+    model = torch.load(model_path, map_location=device)
+    print("Pruned model loaded from", model_path)
+    return model
+
+
+def save_pruned_model(
+    model,
+    model_index,
+    pruning_ratio,
+):
+    model_path = f"tmp/pruned_models/pruned_model{model_index}_{pruning_ratio}.pth"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+
+    model.eval()
+    torch.save(model, model_path)
+    print(f"Pruned model saved to {model_path}")
+
+
+def main(model_index, pruning_ratio, finetune=True, verbose=False, device=DEVICE):
+    df = pd.read_csv("../hpo/best_trials.csv")
+    selected = df.iloc[model_index]
+    param = selected.to_dict()
+    print(
+        f"Model{model_index} params: {{'trial_id': {param['trial_id']}, 'num_transformers': {param['num_transformers']}, 'embedding_dim': {param['embedding_dim']}, 'num_heads': {param['num_heads']},  'dropout': {param['dropout']}}}"
+    )
     num_particles = 8
     num_feats = 3
     batch_size = 256
     num_classes = 5
+
+    model_config = {
+        "in_dim": num_feats,
+        "embbed_dim": int(param["embedding_dim"]),
+        "num_heads": int(param["num_heads"]),
+        "num_classes": num_classes,
+        "num_transformers": int(param["num_transformers"]),
+        "dropout": float(param["dropout"]),
+        "num_particles": num_particles,
+        "activation": "ReLU",
+        "normalization": "Batch",
+    }
 
     train_loader, val_loader, test_loader, classes = load_dataset(
         num_particles=num_particles,
@@ -284,32 +310,22 @@ if __name__ == "__main__":
         batch_size=batch_size,
     )
 
-    model_config = {
-        "in_dim": num_feats,
-        "embbed_dim": trial_config["embbed_dim"],
-        "num_heads": trial_config["num_heads"],
-        "num_classes": num_classes,
-        "num_transformers": trial_config["num_transformers"],
-        "dropout": trial_config["dropout"],
-        "num_particles": num_particles,
-        "activation": "ReLU",
-        "normalization": "Batch",
-    }
-
-    model_path = f"tmp/models/trial{trial}.pth"
+    model_path = f"tmp/models/model{model_index}.pth"
     if not os.path.exists(model_path):
-        ### Train the model ###
+        ### Train origin model ###
         print("Training original model...")
         num_epochs = 25
         train(
             model_config=model_config,
-            trial=trial,
+            model_index=model_index,
+            train_loader=train_loader,
+            val_loader=val_loader,
             num_particles=num_particles,
             num_feats=num_feats,
             num_epochs=num_epochs,
         )
 
-    ### Load the model ###
+    ### Load origin model ###
     model = load_model(
         model_class=ConstituentNet,
         num_particles=num_particles,
@@ -327,27 +343,73 @@ if __name__ == "__main__":
     ### Prune ###
     iterative_steps = 3
     finetune_epochs = 5
-    pruning_ratio = 0.5  # remove 50% dims
-    model_pruned = copy.deepcopy(model).to(DEVICE)
+    model_pruned = copy.deepcopy(model).to(device)
 
     pruned_flops, pruned_params, pruned_acc = prune(
         model_pruned=model_pruned,
         num_particles=num_particles,
         num_feats=num_feats,
         pruning_ratio=pruning_ratio,
-        num_heads=trial_config["num_heads"],
+        num_heads=model_config["num_heads"],
         train_loader=train_loader,
         val_loader=val_loader,
         test_loader=test_loader,
         iterative_steps=iterative_steps,
         finetune_epochs=finetune_epochs,
+        finetune=finetune,
+        verbose=verbose,
     )
 
-    # Save pruned model
-    pruned_model_path = f"tmp/pruned_models/pruned_trial{trial}_{pruning_ratio}.pth"
-    os.makedirs(os.path.dirname(pruned_model_path), exist_ok=True)
-    torch.save(model_pruned, pruned_model_path)
+    save_pruned_model(
+        model=model_pruned, model_index=model_index, pruning_ratio=pruning_ratio
+    )
 
     pruning_summary(
         base_acc, pruned_acc, base_params, pruned_params, base_flops, pruned_flops
     )
+
+
+if __name__ == "__main__":
+    seed_everything(20)
+
+    model_index = 8
+    pruning_ratio = 0.7
+    main(model_index, pruning_ratio)
+
+    # # Evaluation only
+    # df = pd.read_csv("../hpo/best_trials.csv")
+    # selected = df.iloc[model_index]
+    # param = selected.to_dict()
+
+    # num_particles = 8
+    # num_feats = 3
+    # batch_size = 256
+    # num_classes = 5
+
+    # train_loader, val_loader, test_loader, classes = load_dataset(
+    #     num_particles=num_particles,
+    #     num_feats=num_feats,
+    #     batch_size=batch_size,
+    # )
+
+    # model_path = f"tmp/models/model{model_index}.pth"
+    # model = load_model(
+    #     model_class=ConstituentNet,
+    #     num_particles=num_particles,
+    #     num_feats=num_feats,
+    #     device=DEVICE,
+    #     model_path=model_path,
+    # )[0]
+
+    # # Base model
+    # base_acc = evaluate_model(model, test_loader)
+    # base_flops, base_params = count_flop_param(model)
+
+    # # Pruned model
+    # model_pruned = load_pruned_model(model_index, pruning_ratio)
+    # pruned_acc = evaluate_model(model_pruned, test_loader)
+    # pruned_flops, pruned_params = count_flop_param(model_pruned)
+
+    # pruning_summary(
+    #     base_acc, pruned_acc, base_params, pruned_params, base_flops, pruned_flops
+    # )
