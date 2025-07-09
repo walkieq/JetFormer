@@ -280,7 +280,9 @@ def save_pruned_model(
     print(f"Pruned model saved to {model_path}")
 
 
-def main(model_index, pruning_ratio, finetune=True, verbose=False, device=DEVICE):
+def main(
+    model_index, pruning_ratio, finetune=True, verbose=False, save=True, device=DEVICE
+):
     df = pd.read_csv("../hpo/best_trials.csv")
     selected = df.iloc[model_index]
     param = selected.to_dict()
@@ -360,9 +362,10 @@ def main(model_index, pruning_ratio, finetune=True, verbose=False, device=DEVICE
         verbose=verbose,
     )
 
-    save_pruned_model(
-        model=model_pruned, model_index=model_index, pruning_ratio=pruning_ratio
-    )
+    if save:
+        save_pruned_model(
+            model=model_pruned, model_index=model_index, pruning_ratio=pruning_ratio
+        )
 
     pruning_summary(
         base_acc, pruned_acc, base_params, pruned_params, base_flops, pruned_flops
@@ -372,9 +375,9 @@ def main(model_index, pruning_ratio, finetune=True, verbose=False, device=DEVICE
 if __name__ == "__main__":
     seed_everything(20)
 
-    model_index = 8
+    model_index = 6
     pruning_ratio = 0.7
-    main(model_index, pruning_ratio)
+    main(model_index, pruning_ratio, save=True)
 
     # # Evaluation only
     # df = pd.read_csv("../hpo/best_trials.csv")

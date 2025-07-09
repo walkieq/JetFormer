@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os
 import sys
+from time import time
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
@@ -10,29 +11,7 @@ from train import load_model, seed_everything
 from prune import load_pruned_model
 
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-
-
-def trace_from_full_model(
-    model_index, pruning_ratio, num_particles, num_feats, base_path, pruned_path, device
-):
-    model_base = load_model(
-        model_class=ConstituentNet,
-        num_particles=num_particles,
-        num_feats=num_feats,
-        device=device,
-        model_path=f"tmp/models/model{model_index}.pth",
-    )[0]
-    model_pruned = load_pruned_model(model_index, pruning_ratio)
-
-    model_base.eval()
-    model_pruned.eval()
-    dummy_input = torch.randn(1, num_particles, num_feats).to(device)
-    model_base_script = torch.jit.trace(model_base, dummy_input)
-    model_pruned_script = torch.jit.trace(model_pruned, dummy_input)
-    torch.jit.save(model_base_script, base_path)
-    torch.jit.save(model_pruned_script, pruned_path)
-    print(f"Base model scripted and saved to {base_path}")
-    print(f"Pruned model scripted and saved to {pruned_path}")
+# DEVICE = torch.device("cpu")
 
 
 def estimate_latency(model, example_inputs, repetitions):
@@ -47,6 +26,7 @@ def estimate_latency(model, example_inputs, repetitions):
         for _ in range(20):
             _ = model(example_inputs)
 
+    t = time()
     with torch.no_grad():
         for rep in range(repetitions):
             starter.record()
@@ -56,6 +36,8 @@ def estimate_latency(model, example_inputs, repetitions):
             torch.cuda.synchronize()
             curr_time = starter.elapsed_time(ender)
             timings[rep] = curr_time
+    latency = (time() - t) * 1000  # Convert to milliseconds
+    print(latency / repetitions, "ms per repetition")
 
     mean_syn = np.sum(timings) / repetitions
     std_syn = np.std(timings)
@@ -82,22 +64,6 @@ def compare_latency(
     device=DEVICE,
 ):
     seed_everything(20)
-    # base_path = f"tmp/models/model{model_index}.pt"
-    # pruned_path = f"tmp/pruned_models/pruned_model{model_index}_{pruning_ratio}.pt"
-    # Convert models to scripted format to better estimate latency
-    # if not os.path.exists(base_path) or not os.path.exists(pruned_path):
-    #     os.makedirs(os.path.dirname(base_path), exist_ok=True)
-    #     os.makedirs(os.path.dirname(pruned_path), exist_ok=True)
-
-    #     trace_from_full_model(
-    #         model_index,
-    #         pruning_ratio,
-    #         num_particles,
-    #         num_feats,
-    #         base_path,
-    #         pruned_path,
-    #         device,
-    #     )
 
     model_base = load_model(
         model_class=ConstituentNet,
@@ -106,12 +72,15 @@ def compare_latency(
         device=device,
         model_path=f"tmp/models/model{model_index}.pth",
     )[0]
-    model_pruned = load_pruned_model(model_index, pruning_ratio)
+    model_pruned = load_pruned_model(model_index, pruning_ratio, device=device)
 
+    # base_path = f"tmp/models/model{model_index}.pt"
+    # pruned_path = f"tmp/pruned_models/pruned_model{model_index}_{pruning_ratio}.pt"
     # model_base_script = torch.jit.load(base_path, map_location=device)
     # model_pruned_script = torch.jit.load(pruned_path, map_location=device)
 
-    example_input = torch.randn(32, num_particles, num_feats).to(device)
+    # Set larger batch size to get 100% GPU ustilization
+    example_input = torch.randn(5120, num_particles, num_feats).to(device)
     latency_mu_base, latency_std_base = estimate_latency(
         model_base, example_input, repetitions
     )
