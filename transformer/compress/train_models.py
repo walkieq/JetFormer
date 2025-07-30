@@ -20,6 +20,7 @@ def train_single_model(
     num_particles,
     num_feats,
     num_epochs,
+    save,
 ):
     model = ConstituentNet(**model_config).to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
@@ -48,7 +49,7 @@ def train_single_model(
         num_feats=num_feats,
         model_config=model_config,
         device=DEVICE,
-        save=True,
+        save=save,
         model_path=f"tmp/models/model{model_index}.pth",
         output_path=f"tmp/outputs/loss_acc_model{model_index}.npz",
     )
@@ -64,12 +65,12 @@ def evaluate_best_models(model_indices, test_loader, device=DEVICE):
             device=DEVICE,
             model_path=model_path,
         )[0]
-        acc = evaluate_model(model, test_loader, device)
-        print(f"Model {model_index} accuracy: {acc:.4f}")
+        acc, auc = evaluate_model(model, test_loader, device)
+        print(f"Model {model_index} accuracy: {acc:.4f}, auc: {auc:.4f}")
 
 
 def train_best_models(
-    df, model_indices, num_particles, num_feats, batch_size, num_epochs
+    df, model_indices, num_particles, num_feats, batch_size, num_epochs, save=True
 ):
 
     train_loader, val_loader, test_loader, classes = load_dataset(
@@ -106,6 +107,7 @@ def train_best_models(
             num_particles,
             num_feats,
             num_epochs,
+            save,
         )
 
     evaluate_best_models(model_indices, test_loader)
@@ -120,10 +122,12 @@ if __name__ == "__main__":
     num_epochs = 25
 
     df = pd.read_csv("../hpo/best_trials.csv")
-    model_indices = [12]
+    model_indices = [3]
     train_best_models(
-        df, model_indices, num_particles, num_feats, batch_size, num_epochs
+        df, model_indices, num_particles, num_feats, batch_size, num_epochs, save=False
     )
+
+    # Evaluation only
     # train_loader, val_loader, test_loader, classes = load_dataset(
     #     num_particles=num_particles,
     #     num_feats=num_feats,

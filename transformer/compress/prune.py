@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch_pruning as tp
 from fvcore.nn import FlopCountAnalysis
+from sklearn.metrics import roc_auc_score
 import sys
 import os
 import copy
@@ -21,17 +23,50 @@ logging.getLogger("fvcore.nn.jit_analysis").setLevel(logging.ERROR)
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
+# def evaluate_model(model, dataloader, device=DEVICE):
+#     model.eval()
+#     correct, total = 0, 0
+#     with torch.no_grad():
+#         for x, y in dataloader:
+#             x, y = x.to(device), y.to(device)
+#             out = model(x)
+#             preds = out.argmax(dim=-1)
+#             correct += (preds == y).sum().item()
+#             total += y.size(0)
+#     return correct / total
+
+
 def evaluate_model(model, dataloader, device=DEVICE):
     model.eval()
     correct, total = 0, 0
+    all_probs = []
+    all_labels = []
+
     with torch.no_grad():
         for x, y in dataloader:
             x, y = x.to(device), y.to(device)
             out = model(x)
+            probs = F.softmax(out, dim=-1)
             preds = out.argmax(dim=-1)
+
             correct += (preds == y).sum().item()
             total += y.size(0)
-    return correct / total
+
+            all_probs.append(probs.cpu())
+            all_labels.append(y.cpu())
+
+    acc = correct / total
+
+    all_probs = torch.cat(all_probs, dim=0).numpy()
+    all_labels = torch.cat(all_labels, dim=0).numpy()
+
+    # AUC
+    try:
+        auc = roc_auc_score(all_labels, all_probs, multi_class="ovr")
+    except ValueError:
+        auc = float("nan")
+
+    return acc, auc
 
 
 def count_flop_param(model, num_particles=8, num_feats=3, device=DEVICE):
@@ -225,7 +260,7 @@ def prune(
             )
 
         # Evaludate pruned model
-        pruned_acc = evaluate_model(model_pruned, test_loader)
+        pruned_acc, pruned_auc = evaluate_model(model_pruned, test_loader)
         pruned_flops, pruned_params = count_flop_param(model_pruned)
         print(
             f"After step {step+1}: FLOPs = {pruned_flops}M, Params = {pruned_params}M, Accuracy = {pruned_acc:.4f}"
@@ -336,7 +371,7 @@ def main(
         model_path=model_path,
     )[0]
 
-    base_acc = evaluate_model(model, test_loader)
+    base_acc, base_auc = evaluate_model(model, test_loader)
     base_flops, base_params = count_flop_param(model)
     print(
         f"Original: FLOPs = {base_flops}M, Params = {base_params}M, Accuracy = {base_acc:.4f}"
@@ -405,12 +440,12 @@ if __name__ == "__main__":
     # )[0]
 
     # # Base model
-    # base_acc = evaluate_model(model, test_loader)
+    # base_acc, base_auc = evaluate_model(model, test_loader)
     # base_flops, base_params = count_flop_param(model)
 
     # # Pruned model
     # model_pruned = load_pruned_model(model_index, pruning_ratio)
-    # pruned_acc = evaluate_model(model_pruned, test_loader)
+    # pruned_acc, pruned_acc = evaluate_model(model_pruned, test_loader)
     # pruned_flops, pruned_params = count_flop_param(model_pruned)
 
     # pruning_summary(
