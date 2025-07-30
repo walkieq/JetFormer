@@ -344,30 +344,33 @@ if __name__ == "__main__":
 
     num_particles = 128
     num_feats = 17
-    batch_size = 256
+    # batch_size = 256
+    batch_size = 128
     # num_transformers = 3
-    num_transformers = 8
+    num_transformers = 10
     embbed_dim = 128
     # num_heads = 4
     num_heads = 8
     activation = "ReLU"
     normalization = "Batch"
-    dropout = 0.05
+    dropout = 0
 
-    num_epochs = 30
-    early_stopping_patience = 4
+    # num_epochs = 30
+    num_epochs = 500
+    # early_stopping_patience = 4
+    early_stopping_patience = 30
     save = True
     model_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/models/{num_transformers}_{embbed_dim}_{num_heads}.pth",
+        f"jetclass_results/{n_per_class}M/models/{num_transformers}_{embbed_dim}_{num_heads}_{dropout}.pth",
     )
     plot_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_plot.png",
+        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_{dropout}_plot.png",
     )
     output_path = os.path.join(
         BASE_DIR,
-        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_loss_acc.npz",
+        f"jetclass_results/{n_per_class}M/outputs/{num_transformers}_{embbed_dim}_{num_heads}_{dropout}_loss_acc.npz",
     )
 
     train_loader, val_loader, test_loader = get_dataloaders(
