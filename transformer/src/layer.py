@@ -3,6 +3,8 @@ import typing
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
 
 torch.set_printoptions(precision=5, threshold=2097152, linewidth=1000, sci_mode=False)
 
@@ -236,7 +238,8 @@ class SelfAttention(nn.Module):
 
         energy_post = energy
         attention = torch.softmax(energy_post / (self.head_dim ** (1 / 2)), dim=-1)
-        self.debug_print("attention", attention)
+        # attention = F.softmax(energy_post / (self.head_dim ** (1 / 2)), dim=-1)
+        # self.debug_print("attention", attention)
 
         # Output
         out = torch.einsum("nhql,nlhc->nqhc", [attention, values])
