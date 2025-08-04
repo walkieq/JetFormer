@@ -15,7 +15,6 @@ LLVM_BUILD_DIR = os.path.join(ALLO_T4P_ROOT, "externals/llvm-project/build")
 os.environ["LLVM_BUILD_DIR"] = LLVM_BUILD_DIR
 
 from train import seed_everything, load_dataset
-from train_mlp import evaluate_mlp
 
 # source ~/xilinx_vitis.sh
 # source /opt/xilinx/xrt/setup.sh
@@ -44,8 +43,8 @@ def llvm_emu(example_inputs):
         model, example_inputs=example_inputs, verbose=False
     )
     golden = model(*example_inputs)
-    np_inputs = [x.detach().numpy() for x in example_inputs]
-    res = llvm_mod(*np_inputs)
+    np_input = example_inputs[0].detach().numpy()
+    res = llvm_mod(np_input)
     torch.testing.assert_close(res, golden.detach().numpy(), rtol=1e-5, atol=1e-5)
     print("Passed!")
 
@@ -55,7 +54,7 @@ def llvm_emu(example_inputs):
 # Vitis HLS
 def vitis_emu(example_inputs, mode="sw_emu", project_name="mlp_emu.prj"):
     os.environ["XDEVICE"] = "xilinx_u250_gen3x16_xdma_4_1_202210_1"
-    os.environ["XCL_EMULATION_MODE"] = "sw_emu"
+    os.environ["XCL_EMULATION_MODE"] = mode
 
     vitis_mod = allo.frontend.from_pytorch(
         model,
@@ -67,11 +66,10 @@ def vitis_emu(example_inputs, mode="sw_emu", project_name="mlp_emu.prj"):
     # print(vitis_mod.hls_code)
 
     golden = model(*example_inputs)
-    # x_np = np.random.random((batch_size, num_feats)).astype(np.float32)
-    x_np = example_inputs[0].detach().numpy()
+    np_input = example_inputs[0].detach().numpy()
     allo_out = np.zeros((batch_size, 5), dtype=np.float32)
 
-    vitis_mod(x_np, allo_out)
+    vitis_mod(np_input, allo_out)
     np.testing.assert_allclose(allo_out, golden.detach().numpy(), rtol=1e-5, atol=1e-5)
     print("Passed!")
 
@@ -117,8 +115,11 @@ def _evaluate_single(model, test_loader, run_inference):
             x = x.view(x.size(0), -1)
             output = run_inference(model, x)
             probs = F.softmax(output, dim=-1)
-
             preds = probs.argmax(dim=1)
+            # Last batch may have fewer samples
+            if preds.shape[0] != y.shape[0]:
+                preds = preds[: y.shape[0]]
+                probs = probs[: y.shape[0]]
             correct += (preds == y).sum().item()
             total += y.size(0)
 
@@ -154,17 +155,23 @@ if __name__ == "__main__":
     )
     example_inputs = [next(iter(test_loader))[0].view(batch_size, -1)]
 
-    # llvm_mod = llvm_emu(example_inputs)
-    # print("Target: LLVM")
-    # evaluate(model, llvm_mod, test_loader)
+    #  LLVM
+    llvm_mod = llvm_emu(example_inputs)
+    print("Target: LLVM")
+    evaluate(model, llvm_mod, test_loader)
 
-    # test sw_emu
-    vitis_mod = vitis_emu(example_inputs, mode="sw_emu", project_name="test_sw.prj")
-    print("Target: VITIS HLS")
+    # Test sw_emu / hw_emu
+    mode = "hw_emu"
+    project_name = "test_hw.prj"
+    vitis_mod = vitis_emu(example_inputs, mode=mode, project_name=project_name)
+    # Evaluation
     num_batches = 50
     subset_dataset = Subset(test_loader.dataset, range(num_batches * batch_size))
-    subset_test_loader = DataLoader(subset_dataset, batch_size=32, shuffle=False)
+    subset_test_loader = DataLoader(
+        subset_dataset, batch_size=batch_size, shuffle=False
+    )
     evaluate(model, vitis_mod, subset_test_loader)
+    print("Target: VITIS HLS")
     print(
         f"{len(test_loader)} batches in total, {num_batches} batches tested, batch size: {batch_size}"
     )
