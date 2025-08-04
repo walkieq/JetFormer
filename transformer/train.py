@@ -174,7 +174,11 @@ def _load_N_dataset(
     val_ratio: float,
     num_workers: int = 4,
     prefetch_factor: int = 4,  # Number of batches to prefetch for each worker
+    persistent_workers: bool = True,  # Keep workers alive between epochs instead of restarting
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
+    if num_workers <= 0:
+        prefetch_factor = None
+        persistent_workers = False
     train_dir = os.path.join(
         PROCESSED_DIR, str(num_particles), f"{num_feats}f", "train.h5"
     )
@@ -197,7 +201,7 @@ def _load_N_dataset(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        persistent_workers=True,  # Keep workers alive between epochs instead of restarting
+        persistent_workers=persistent_workers,  
         prefetch_factor=prefetch_factor,
     )
     val_loader = DataLoader(
@@ -205,7 +209,7 @@ def _load_N_dataset(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        persistent_workers=True,
+        persistent_workers=persistent_workers,
         prefetch_factor=prefetch_factor,
     )
     test_loader = DataLoader(
@@ -213,7 +217,7 @@ def _load_N_dataset(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        persistent_workers=True,
+        persistent_workers=persistent_workers,
         prefetch_factor=prefetch_factor,
     )
 
@@ -225,6 +229,7 @@ def load_dataset(
     num_feats: int,
     batch_size: int = 128,
     val_ratio: float = 0.1,
+    num_workers: int = 4,
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
 
     if num_particles == 1:
@@ -235,6 +240,7 @@ def load_dataset(
             num_feats=num_feats,
             batch_size=batch_size,
             val_ratio=val_ratio,
+            num_workers=num_workers,
         )
 
 
