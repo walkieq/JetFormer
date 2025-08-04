@@ -12,7 +12,6 @@ env/
 # Ignore data files
 *.h5
 *.npy
-*.csv
 data/
 models/
 outputs/
