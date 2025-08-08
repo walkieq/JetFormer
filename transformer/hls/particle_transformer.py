@@ -5,7 +5,6 @@ import os
 import sys
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import Subset, DataLoader
-from model import ConstituentNet, SliceFirstDim
 from tqdm import tqdm
 
 
@@ -16,6 +15,7 @@ LLVM_BUILD_DIR = os.path.join(ALLO_T4P_ROOT, "externals/llvm-project/build")
 os.environ["LLVM_BUILD_DIR"] = LLVM_BUILD_DIR
 
 from train import seed_everything, load_dataset, load_model
+from src.adjusted_model import ConstituentNet, SliceFirstDim
 
 # source ~/xilinx_vitis.sh
 # source /opt/xilinx/xrt/setup.sh
@@ -134,28 +134,36 @@ if __name__ == "__main__":
 
     num_particles = 8
     num_feats = 3
-    # TODO: try smaller batch size for hw emu
-    # try pruned model3: need to reconstruct the model architecture + load state
-    batch_size = 32
+    batch_size = 16
+    # batch_size = 2
 
+    # Model 0 parameters
     # num_transformers = 4
-    # embbed_dim = 16
+    # embbed_dim = 8
     # num_heads = 2
     # dropout = 0
 
-    # Load model
+    # Load pruned model
+    model_index = 0
+    pruned_ratio = 0.5
+    model_path = os.path.join(
+        PROJECT_ROOT,
+        f"compress/tmp/pruned_models/pruned_model{model_index}_{pruned_ratio}.pth",
+    )
+    model = torch.load(model_path, weights_only=False, map_location="cpu")
+
+    # Load original model
+    # model_index = 0
     # model_path = os.path.join(
-    #     PROJECT_ROOT, f"compress/tmp/pruned_models/pruned_model6_0.5.pth"
+    #     PROJECT_ROOT, f"compress/tmp/models/model{model_index}.pth"
     # )
-    # model = torch.load(model_path, weights_only=False)
-    model_path = os.path.join(PROJECT_ROOT, "compress/tmp/models/model3.pth")
-    model = load_model(
-        model_class=ConstituentNet,
-        num_particles=num_particles,
-        num_feats=num_feats,
-        device="cpu",
-        model_path=model_path,
-    )[0]
+    # model = load_model(
+    #     model_class=ConstituentNet,
+    #     num_particles=num_particles,
+    #     num_feats=num_feats,
+    #     device="cpu",
+    #     model_path=model_path,
+    # )[0]
 
     model.eval()
 
@@ -176,10 +184,11 @@ if __name__ == "__main__":
 
     # VITIS HLS
     mode = "hw_emu"
-    project_name = "transformer_hw.prj"
+    project_name = "pruned0_one_hw.prj"
     vitis_mod = vitis_emu(example_inputs, mode=mode, project_name=project_name)
     # Evaluation
-    num_batches = 10
+    # Only test one batch for hw_emu to avoid resource issues
+    num_batches = 1
     subset_dataset = Subset(test_loader.dataset, range(num_batches * batch_size))
     subset_test_loader = DataLoader(
         subset_dataset, batch_size=batch_size, shuffle=False

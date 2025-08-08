@@ -156,16 +156,16 @@ if __name__ == "__main__":
     example_inputs = [next(iter(test_loader))[0].view(batch_size, -1)]
 
     #  LLVM
-    llvm_mod = llvm_emu(example_inputs)
-    print("Target: LLVM")
-    evaluate(model, llvm_mod, test_loader)
+    # llvm_mod = llvm_emu(example_inputs)
+    # print("Target: LLVM")
+    # evaluate(model, llvm_mod, test_loader)
 
     # Test sw_emu / hw_emu
     mode = "hw_emu"
     project_name = "test_hw.prj"
     vitis_mod = vitis_emu(example_inputs, mode=mode, project_name=project_name)
     # Evaluation
-    num_batches = 50
+    num_batches = 1
     subset_dataset = Subset(test_loader.dataset, range(num_batches * batch_size))
     subset_test_loader = DataLoader(
         subset_dataset, batch_size=batch_size, shuffle=False
