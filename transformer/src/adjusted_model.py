@@ -1,3 +1,6 @@
+################################################
+# Adjusted model for Allo backend compatibility
+################################################
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

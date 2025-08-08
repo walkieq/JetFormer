@@ -5,7 +5,8 @@ import sys
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
-from src.net import ConstituentNet
+# from src.net import ConstituentNet
+from src.adjusted_model import ConstituentNet
 from train import seed_everything, load_dataset, train_validate_loop, load_model
 from prune import evaluate_model
 
@@ -124,7 +125,7 @@ if __name__ == "__main__":
     df = pd.read_csv("../hpo/best_trials.csv")
     model_indices = [3]
     train_best_models(
-        df, model_indices, num_particles, num_feats, batch_size, num_epochs, save=False
+        df, model_indices, num_particles, num_feats, batch_size, num_epochs, save=True
     )
 
     # Evaluation only

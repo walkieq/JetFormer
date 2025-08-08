@@ -14,26 +14,14 @@ import warnings
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
-from src.net import ConstituentNet
-from src.layer import SelfAttention
+# from src.net import ConstituentNet
+# from src.layer import SelfAttention
+from src.adjusted_model import ConstituentNet, SelfAttention
 from train import seed_everything, load_dataset, train_validate_loop, load_model
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 logging.getLogger("fvcore.nn.jit_analysis").setLevel(logging.ERROR)
 DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-
-
-# def evaluate_model(model, dataloader, device=DEVICE):
-#     model.eval()
-#     correct, total = 0, 0
-#     with torch.no_grad():
-#         for x, y in dataloader:
-#             x, y = x.to(device), y.to(device)
-#             out = model(x)
-#             preds = out.argmax(dim=-1)
-#             correct += (preds == y).sum().item()
-#             total += y.size(0)
-#     return correct / total
 
 
 def evaluate_model(model, dataloader, device=DEVICE):
@@ -107,8 +95,9 @@ def train(
     num_particles,
     num_feats,
     num_epochs,
+    device=DEVICE,
 ):
-    model = ConstituentNet(**model_config).to(DEVICE)
+    model = ConstituentNet(**model_config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -169,18 +158,19 @@ def prune(
     train_loader,
     val_loader,
     test_loader,
+    iterative_steps,
+    finetune_epochs,
     pruning_ratio=0.5,
     num_classes=5,
-    iterative_steps=3,
-    finetune_epochs=5,
     finetune=True,
     verbose=False,
+    device=DEVICE,
 ):
     if verbose:
         print_linear_layer_shapes(model_pruned, "Before Pruning")
         print_attention_heads(model_pruned, "Before Pruning")
 
-    example_inputs = torch.randn(1, num_particles, num_feats).to(DEVICE)
+    example_inputs = torch.randn(1, num_particles, num_feats).to(device)
     imp = tp.importance.TaylorImportance()
     # imp = tp.importance.MagnitudeImportance(p=1)
 
@@ -212,7 +202,7 @@ def prune(
             compute_taylor_importance_gradients(
                 model=model_pruned,
                 dataloader=train_loader,
-                device=DEVICE,
+                device=device,
                 max_batches=50,
             )
 
@@ -253,7 +243,7 @@ def prune(
                 num_particles=num_particles,
                 num_feats=num_feats,
                 model_config=None,
-                device=DEVICE,
+                device=device,
                 save=False,
                 model_path=None,
                 output_path=None,
@@ -316,7 +306,14 @@ def save_pruned_model(
 
 
 def main(
-    model_index, pruning_ratio, finetune=True, verbose=False, save=True, device=DEVICE
+    model_index,
+    pruning_ratio,
+    iterative_steps,
+    finetune_epochs,
+    finetune=True,
+    verbose=False,
+    save=True,
+    device=DEVICE,
 ):
     df = pd.read_csv("../hpo/best_trials.csv")
     selected = df.iloc[model_index]
@@ -378,8 +375,6 @@ def main(
     )
 
     ### Prune ###
-    iterative_steps = 3
-    finetune_epochs = 5
     model_pruned = copy.deepcopy(model).to(device)
 
     pruned_flops, pruned_params, pruned_acc = prune(
@@ -410,9 +405,11 @@ def main(
 if __name__ == "__main__":
     seed_everything(20)
 
-    model_index = 6
-    pruning_ratio = 0.7
-    main(model_index, pruning_ratio, save=True)
+    model_index = 0
+    pruning_ratio = 0.5
+    iterative_steps = 5
+    finetune_epochs = 5
+    main(model_index, pruning_ratio, iterative_steps, finetune_epochs, save=True)
 
     # # Evaluation only
     # df = pd.read_csv("../hpo/best_trials.csv")
