@@ -8,20 +8,17 @@ import sys
 import os
 import copy
 import logging
-import numpy as np
 import pandas as pd
 import warnings
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
-# from src.net import ConstituentNet
-# from src.layer import SelfAttention
-from src.adjusted_model import ConstituentNet, SelfAttention
+from src.adjusted_model import JetFormer, SelfAttention
 from train import seed_everything, load_dataset, train_validate_loop, load_model
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 logging.getLogger("fvcore.nn.jit_analysis").setLevel(logging.ERROR)
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 
 def evaluate_model(model, dataloader, device=DEVICE):
@@ -58,6 +55,7 @@ def evaluate_model(model, dataloader, device=DEVICE):
 
 
 def count_flop_param(model, num_particles=8, num_feats=3, device=DEVICE):
+    model.eval()
     dummy_inputs = torch.randn(1, num_particles, num_feats).to(device)
     flops = FlopCountAnalysis(model, dummy_inputs).total() / 1e6
     params = sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6
@@ -97,7 +95,7 @@ def train(
     num_epochs,
     device=DEVICE,
 ):
-    model = ConstituentNet(**model_config).to(device)
+    model = JetFormer(**model_config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -361,7 +359,7 @@ def main(
 
     ### Load origin model ###
     model = load_model(
-        model_class=ConstituentNet,
+        model_class=JetFormer,
         num_particles=num_particles,
         num_feats=num_feats,
         device=DEVICE,
@@ -405,7 +403,7 @@ def main(
 if __name__ == "__main__":
     seed_everything(20)
 
-    model_index = 0
+    model_index = 2
     pruning_ratio = 0.5
     iterative_steps = 5
     finetune_epochs = 5
@@ -429,7 +427,7 @@ if __name__ == "__main__":
 
     # model_path = f"tmp/models/model{model_index}.pth"
     # model = load_model(
-    #     model_class=ConstituentNet,
+    #     model_class=JetFormer,
     #     num_particles=num_particles,
     #     num_feats=num_feats,
     #     device=DEVICE,

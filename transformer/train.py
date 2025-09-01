@@ -22,7 +22,7 @@ from time import time
 import random
 import copy
 
-from src.net import ConstituentNet
+from src.net import JetFormer
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -201,7 +201,7 @@ def _load_N_dataset(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        persistent_workers=persistent_workers,  
+        persistent_workers=persistent_workers,
         prefetch_factor=prefetch_factor,
     )
     val_loader = DataLoader(
@@ -632,7 +632,7 @@ def train(
 
     if do_train:
         # Initialize model
-        model = ConstituentNet(**model_config).to(DEVICE)
+        model = JetFormer(**model_config).to(DEVICE)
 
         # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
@@ -784,7 +784,7 @@ if __name__ == "__main__":
     )
 
     # model = load_model(
-    #     model_class=ConstituentNet,
+    #     model_class=JetFormer,
     #     num_particles=num_particles,
     #     num_feats=num_feats,
     #     model_path=os.path.join(

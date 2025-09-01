@@ -5,12 +5,11 @@ import sys
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
-# from src.net import ConstituentNet
-from src.adjusted_model import ConstituentNet
+from src.adjusted_model import JetFormer
 from train import seed_everything, load_dataset, train_validate_loop, load_model
 from prune import evaluate_model
 
-DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 
 def train_single_model(
@@ -23,7 +22,7 @@ def train_single_model(
     num_epochs,
     save,
 ):
-    model = ConstituentNet(**model_config).to(DEVICE)
+    model = JetFormer(**model_config).to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -60,7 +59,7 @@ def evaluate_best_models(model_indices, test_loader, device=DEVICE):
     for model_index in model_indices:
         model_path = f"tmp/models/model{model_index}.pth"
         model = load_model(
-            model_class=ConstituentNet,
+            model_class=JetFormer,
             num_particles=num_particles,
             num_feats=num_feats,
             device=DEVICE,
@@ -123,7 +122,7 @@ if __name__ == "__main__":
     num_epochs = 25
 
     df = pd.read_csv("../hpo/best_trials.csv")
-    model_indices = [3]
+    model_indices = [12]
     train_best_models(
         df, model_indices, num_particles, num_feats, batch_size, num_epochs, save=True
     )

@@ -19,7 +19,7 @@ from train import (
     save_loss_acc,
     load_model,
 )
-from src.net import ConstituentNet
+from src.net import JetFormer
 
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -403,7 +403,7 @@ if __name__ == "__main__":
         "normalization": normalization,
     }
 
-    model = ConstituentNet(**model_config).to(DEVICE)
+    model = JetFormer(**model_config).to(DEVICE)
 
     # optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=25)
@@ -448,7 +448,7 @@ if __name__ == "__main__":
         )
 
     # model = load_model(
-    #     model_class=ConstituentNet,
+    #     model_class=JetFormer,
     #     num_particles=num_particles,
     #     num_feats=num_feats,
     #     device=DEVICE,

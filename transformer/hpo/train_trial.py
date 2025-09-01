@@ -11,10 +11,10 @@ from torch.utils.data import DataLoader, Subset
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 from train import train_validate_loop
-from src.net import ConstituentNet
+from src.net import JetFormer
 from src.dataset import H5Dataset
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 
 
 def seed_everything(seed: int = 20):
@@ -91,7 +91,7 @@ def run_trial(param_file):
         "normalization": "Batch",
     }
 
-    model = ConstituentNet(**model_config).to(DEVICE)
+    model = JetFormer(**model_config).to(DEVICE)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -117,6 +117,7 @@ def run_trial(param_file):
         num_particles=num_particles,
         num_feats=num_feats,
         model_config=model_config,
+        device=DEVICE,
         save=False,
         model_path=None,
         output_path=None,
@@ -138,5 +139,14 @@ def run_trial(param_file):
 
 
 if __name__ == "__main__":
-    seed_everything(20)
+    # Get the file name of the main process
+    caller_script = os.environ.get("PYTHON_PARENT_SCRIPT", "")
+
+    # If called from optuna_main.py, enable fixed seed for full reproducibility
+    # If called from sampler_benchmark.py, do not add seed to allow fair comparison among samplers
+    if "optuna_main" in caller_script:
+        seed_everything(20)
+    elif "sampler_benchmark" in caller_script:
+        pass
+
     run_trial(sys.argv[1])

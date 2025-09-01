@@ -84,6 +84,7 @@ def structure_objective(trial):
         subprocess.run(
             ["python", "train_trial.py", json_path, result_path],
             check=True,  # Raise CalledProcessError on crash
+            env={**os.environ, "PYTHON_PARENT_SCRIPT": __file__},
         )
         with open(result_path, "r") as f:
             result = json.load(f)

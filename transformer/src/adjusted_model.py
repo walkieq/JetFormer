@@ -10,9 +10,9 @@ import typing
 torch.set_printoptions(precision=5, threshold=2097152, linewidth=1000, sci_mode=False)
 
 
-class ConstituentNet(nn.Module):
+class JetFormer(nn.Module):
     """
-    ConstituentNet Base Model
+    JetFormer Base Model
     """
 
     def __init__(
@@ -29,7 +29,7 @@ class ConstituentNet(nn.Module):
         normalization: str = "Batch",
         **kwargs,
     ) -> None:
-        super(ConstituentNet, self).__init__()
+        super(JetFormer, self).__init__()
         self.is_debug = is_debug
         self.input_size = in_dim
         self.channel_in = in_dim
@@ -68,7 +68,7 @@ class ConstituentNet(nn.Module):
         )
 
         # Add slicer to fix Allo slice issue
-        self.slicer = SliceFirstDim()
+        self.slicer = SliceClsToken()
 
         torch.set_printoptions(
             precision=5, threshold=2097152, linewidth=1000, sci_mode=False
@@ -385,7 +385,7 @@ class SelfAttention(nn.Module):
         return final_sum
 
 
-class SliceFirstDim(nn.Module):
+class SliceClsToken(nn.Module):
     def forward(self, inp):
         # Only for out[:, 0, :]
         return inp[:, 0, :]

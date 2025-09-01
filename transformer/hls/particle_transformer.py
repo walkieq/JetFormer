@@ -15,7 +15,7 @@ LLVM_BUILD_DIR = os.path.join(ALLO_T4P_ROOT, "externals/llvm-project/build")
 os.environ["LLVM_BUILD_DIR"] = LLVM_BUILD_DIR
 
 from train import seed_everything, load_dataset, load_model
-from src.adjusted_model import ConstituentNet, SliceFirstDim
+from src.adjusted_model import JetFormer, SliceClsToken
 
 # source ~/xilinx_vitis.sh
 # source /opt/xilinx/xrt/setup.sh
@@ -26,7 +26,7 @@ def llvm_emu(example_inputs):
     llvm_mod = allo.frontend.from_pytorch(
         model,
         example_inputs=example_inputs,
-        leaf_modules=(SliceFirstDim,),
+        leaf_modules=(SliceClsToken,),
         verbose=False,
     )
     golden = model(*example_inputs)
@@ -46,7 +46,7 @@ def vitis_emu(example_inputs, mode="sw_emu", project_name="transformer_emu.prj")
     vitis_mod = allo.frontend.from_pytorch(
         model,
         example_inputs=example_inputs,
-        leaf_modules=(SliceFirstDim,),
+        leaf_modules=(SliceClsToken,),
         target="vitis_hls",
         mode=mode,
         project=project_name,
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     #     PROJECT_ROOT, f"compress/tmp/models/model{model_index}.pth"
     # )
     # model = load_model(
-    #     model_class=ConstituentNet,
+    #     model_class=JetFormer,
     #     num_particles=num_particles,
     #     num_feats=num_feats,
     #     device="cpu",

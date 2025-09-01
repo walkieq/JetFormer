@@ -6,7 +6,7 @@ from time import time
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
-from src.net import ConstituentNet
+from src.net import JetFormer
 from train import load_model, seed_everything
 from prune import load_pruned_model
 
@@ -66,7 +66,7 @@ def compare_latency(
     seed_everything(20)
 
     model_base = load_model(
-        model_class=ConstituentNet,
+        model_class=JetFormer,
         num_particles=num_particles,
         num_feats=num_feats,
         device=device,
@@ -74,13 +74,8 @@ def compare_latency(
     )[0]
     model_pruned = load_pruned_model(model_index, pruning_ratio, device=device)
 
-    # base_path = f"tmp/models/model{model_index}.pt"
-    # pruned_path = f"tmp/pruned_models/pruned_model{model_index}_{pruning_ratio}.pt"
-    # model_base_script = torch.jit.load(base_path, map_location=device)
-    # model_pruned_script = torch.jit.load(pruned_path, map_location=device)
-
     # Set larger batch size to get 100% GPU ustilization
-    example_input = torch.randn(5120, num_particles, num_feats).to(device)
+    example_input = torch.randn(10240, num_particles, num_feats).to(device)
     latency_mu_base, latency_std_base = estimate_latency(
         model_base, example_input, repetitions
     )
@@ -94,8 +89,8 @@ def compare_latency(
 
 
 if __name__ == "__main__":
-    model_index = 6
-    pruning_ratio = 0.7
+    model_index = 2
+    pruning_ratio = 0.5
     compare_latency(
         model_index,
         pruning_ratio,

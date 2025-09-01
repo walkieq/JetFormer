@@ -41,9 +41,9 @@ class DNN(nn.Module):
         return self.net(x)
 
 
-class ConstituentNet(nn.Module):
+class JetFormer(nn.Module):
     """
-    ConstituentNet Base Model
+    JetFormer Model
     """
 
     def __init__(
@@ -60,7 +60,7 @@ class ConstituentNet(nn.Module):
         normalization: str = "Batch",
         **kwargs
     ) -> None:
-        super(ConstituentNet, self).__init__()
+        super(JetFormer, self).__init__()
         self.is_debug = is_debug
         self.input_size = in_dim
         self.channel_in = in_dim
@@ -532,7 +532,7 @@ metrics = {
 if __name__ == "__main__":
 
     # instantiate model
-    model = ConstituentNet()
+    model = JetFormer()
     print("Model created: ", model)
 
 torch.set_printoptions(profile=None, sci_mode=None, threshold=None)
