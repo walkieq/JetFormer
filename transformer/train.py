@@ -50,6 +50,7 @@ def seed_everything(seed=20):
 def _load_hls4ml_dataset(
     batch_size: int, val_ratio: float
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
+    """Load hls4ml_lhc_jets_hlf dataset from local files."""
     train_dir = os.path.join(PROCESSED_DIR, "1/train")
     test_dir = os.path.join(PROCESSED_DIR, "1/test")
 
@@ -108,6 +109,7 @@ def _load_hls4ml_dataset(
 def welford_mean_std(
     loader: DataLoader, max_batches: int = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute mean and std using Welford's algorithm for numerical stability."""
     n = 0
     mean = None
     M2 = None
@@ -176,6 +178,7 @@ def _load_N_dataset(
     prefetch_factor: int = 4,  # Number of batches to prefetch for each worker
     persistent_workers: bool = True,  # Keep workers alive between epochs instead of restarting
 ) -> Tuple[DataLoader, DataLoader, DataLoader, List[str]]:
+    """Load N-particle M-feature dataset constructed from 150-particle dataset."""
     if num_workers <= 0:
         prefetch_factor = None
         persistent_workers = False
