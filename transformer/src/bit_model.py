@@ -170,7 +170,7 @@ class Transformer(nn.Module):
             raise TypeError("Unknown activation function")
 
         # self.linear_0 = nn.Linear(in_dim, in_dim * 2, bias=False)
-        self.linear_0 = BitLinear(in_dim, in_dim * 2)
+        self.linear_0 = BitLinear(in_dim, in_dim * 2, bias=False)
 
         if self.normalization == "Batch":
             self.norm_1 = nn.BatchNorm1d(in_dim * 2)
@@ -188,7 +188,7 @@ class Transformer(nn.Module):
             raise TypeError("Unknown activation function")
 
         # self.linear_1 = nn.Linear(in_dim * 2, in_dim, bias=False)
-        self.linear_1 = BitLinear(in_dim * 2, in_dim)
+        self.linear_1 = BitLinear(in_dim * 2, in_dim, bias=False)
 
         self.dropout = nn.Dropout(dropout)
 
