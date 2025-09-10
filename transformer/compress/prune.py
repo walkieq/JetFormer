@@ -313,6 +313,18 @@ def main(
     save=True,
     device=DEVICE,
 ):
+    """
+    Main function to perform structured pruning on a selected model.
+    Args:
+        model_index (int): Index of the model to prune (refers to best_trials.csv).
+        pruning_ratio (float): Overall pruning ratio (0 < pruning_ratio < 1).
+        iterative_steps (int): Number of iterative pruning steps.
+        finetune_epochs (int): Number of epochs for fine-tuning after each pruning step.
+        finetune (bool): Whether to fine-tune after each pruning step.
+        verbose (bool): Whether to print detailed layer/head information.
+        save (bool): Whether to save the pruned model.
+        device: Device to run the model on.
+    """
     df = pd.read_csv("../hpo/best_trials.csv")
     selected = df.iloc[model_index]
     param = selected.to_dict()
@@ -407,7 +419,13 @@ if __name__ == "__main__":
     pruning_ratio = 0.5
     iterative_steps = 5
     finetune_epochs = 5
-    main(model_index, pruning_ratio, iterative_steps, finetune_epochs, save=True)
+    main(
+        model_index=model_index,
+        pruning_ratio=pruning_ratio,
+        iterative_steps=iterative_steps,
+        finetune_epochs=finetune_epochs,
+        save=True,
+    )
 
     # # Evaluation only
     # df = pd.read_csv("../hpo/best_trials.csv")
